@@ -20,6 +20,14 @@ const importBtn = document.getElementById('import-btn');
 const stopBtn = document.getElementById('stop-btn');
 const logOutput = document.getElementById('log-output');
 
+// Progress elements
+const progressSection = document.getElementById('progress-section');
+const progressFill = document.getElementById('progress-fill');
+const progressText = document.getElementById('progress-text');
+const progressPercent = document.getElementById('progress-percent');
+const progressTime = document.getElementById('progress-time');
+const progressEta = document.getElementById('progress-eta');
+
 // Load config on startup
 (async () => {
   currentConfig = await electronAPI.loadConfig();
@@ -142,8 +150,21 @@ stopBtn.addEventListener('click', async () => {
   importBtn.disabled = false;
   dryRunBtn.disabled = false;
   isImporting = false;
+  
+  // Stop progress timer
+  if (progressTimer) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+  
   appendLog('\n[Stopped by user]\n');
 });
+
+// Progress tracking variables
+let startTime = null;
+let totalFiles = 0;
+let processedFiles = 0;
+let progressTimer = null;
 
 // Run import
 async function runImport(dryRun) {
@@ -163,6 +184,16 @@ async function runImport(dryRun) {
   importBtn.disabled = true;
   dryRunBtn.disabled = true;
   stopBtn.style.display = 'inline-block';
+  
+  // Initialize progress tracking
+  startTime = Date.now();
+  totalFiles = 0;
+  processedFiles = 0;
+  progressSection.style.display = 'block';
+  updateProgress();
+  
+  // Start timer to update elapsed time
+  progressTimer = setInterval(updateElapsedTime, 1000);
 
   appendLog(`Starting ${dryRun ? 'dry run' : 'import'}...\n\n`);
 
@@ -172,9 +203,20 @@ async function runImport(dryRun) {
   importBtn.disabled = false;
   dryRunBtn.disabled = false;
   isImporting = false;
+  
+  // Stop progress timer
+  if (progressTimer) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
 
   if (result.success) {
     appendLog('\n✓ Completed successfully!\n');
+    // Force finalize to 100%
+    if (totalFiles > 0) {
+      processedFiles = totalFiles;
+    }
+    updateProgress(); // Final update
   } else {
     appendLog('\n✗ Failed: ' + (result.error || 'Unknown error') + '\n');
   }
@@ -183,11 +225,76 @@ async function runImport(dryRun) {
 // Listen for import logs
 electronAPI.onImportLog((data) => {
   appendLog(data);
+  parseProgress(data);
 });
 
 function appendLog(text) {
   logOutput.textContent += text;
   logOutput.scrollTop = logOutput.scrollHeight;
+}
+
+// Parse progress from log output
+function parseProgress(text) {
+  // Look for "Found X html files"
+  const foundMatch = text.match(/Found (\d+) html files/);
+  if (foundMatch) {
+    totalFiles = parseInt(foundMatch[1]);
+    processedFiles = 0;
+    updateProgress();
+  }
+  
+  // Look for file processing "- filename.html -> Title (X blocks)"
+  // Count ALL matches in the chunk, not just presence
+  const fileMatches = text.match(/^- .+\.html -> .+ \(\d+ blocks\)/mg);
+  if (fileMatches && fileMatches.length) {
+    processedFiles += fileMatches.length;
+    // Clamp to totalFiles to avoid going over on noisy logs
+    if (totalFiles > 0) {
+      processedFiles = Math.min(processedFiles, totalFiles);
+    }
+    updateProgress();
+  }
+}
+
+// Update progress display
+function updateProgress() {
+  if (totalFiles === 0) {
+    progressText.textContent = 'Initializing...';
+    progressPercent.textContent = '0%';
+    progressFill.style.width = '40px';
+    return;
+  }
+  
+  const percent = Math.round((processedFiles / totalFiles) * 100);
+  progressText.textContent = `${processedFiles} / ${totalFiles} files`;
+  progressPercent.textContent = `${percent}%`;
+  progressFill.style.width = `${Math.max(5, percent)}%`;
+  
+  // Update ETA
+  if (processedFiles > 0 && processedFiles < totalFiles) {
+    const elapsed = Date.now() - startTime;
+    const avgTimePerFile = elapsed / processedFiles;
+    const remainingFiles = totalFiles - processedFiles;
+    const eta = Math.round((avgTimePerFile * remainingFiles) / 1000);
+    progressEta.textContent = `ETA: ${formatTime(eta)}`;
+  } else if (processedFiles >= totalFiles) {
+    progressEta.textContent = 'Complete!';
+  }
+}
+
+// Update elapsed time display
+function updateElapsedTime() {
+  if (!startTime) return;
+  
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  progressTime.textContent = `Time: ${formatTime(elapsed)}`;
+}
+
+// Format seconds to MM:SS
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
 })(); // End of IIFE

@@ -72,6 +72,12 @@ def main(argv: Optional[list] = None):
             with open(mapping_path, 'a', encoding='utf-8') as fp:
                 fp.write(line)
 
+    # Keep tunnel alive for Notion to fetch images
+    if not args.dry_run:
+        import time
+        print("\n[green]Keeping tunnel alive for 30 seconds for Notion to cache images...[/green]")
+        time.sleep(30)
+    
     tunnel.stop()
 
 if __name__ == '__main__':

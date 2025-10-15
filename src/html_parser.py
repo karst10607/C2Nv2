@@ -48,6 +48,9 @@ def parse_html_file(path: Path) -> Dict[str, Any]:
             elif name == 'img':
                 src = el.get('src')
                 if src:
+                    # Remove query parameters from image URLs
+                    if '?' in src:
+                        src = src.split('?')[0]
                     blocks.append({'type': 'image', 'src': src})
                     processed.add(el)
             elif name == 'table':
@@ -64,7 +67,11 @@ def parse_html_file(path: Path) -> Dict[str, Any]:
                                     cell_children.append({'type':'paragraph','text':t})
                             elif isinstance(c, Tag):
                                 if c.name == 'img' and c.get('src'):
-                                    cell_children.append({'type':'image','src':c.get('src')})
+                                    src = c.get('src')
+                                    # Remove query parameters from image URLs
+                                    if '?' in src:
+                                        src = src.split('?')[0]
+                                    cell_children.append({'type':'image','src':src})
                                 elif c.name in ('p','span','div'):
                                     text = c.get_text(" ", strip=True)
                                     if text:

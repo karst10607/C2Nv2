@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4] - 2025-10-15
+
+### 🐰 Enhanced Progress Bar & Rabbit Animation
+
+#### Real-time Import Progress
+- **Visual Progress Bar**: Beautiful gradient progress bar with animated hopping rabbit
+- **File Counter**: Shows "X / Y files" processed in real-time
+- **Time Tracking**: Live elapsed time display (MM:SS format)
+- **ETA Calculation**: Estimates remaining time based on processing speed
+- **Smooth Animations**: Rabbit hops along progress bar with realistic physics
+
+#### Progress Information Display
+- **Percentage Indicator**: Bold percentage with smooth transitions
+- **Time Display**: Current elapsed time updates every second
+- **Completion Status**: Shows "Complete!" when finished
+- **Clean Design**: Modern rounded corners, shadows, and monospace info boxes
+
+### 🔧 Technical Improvements
+
+#### Image Import Reliability
+- **Query Parameter Cleanup**: Removed `?width=760` parameters from image URLs that were causing 404s
+- **Tunnel Timeout Fix**: Added 30-second delay after import to let Notion cache images
+- **Enhanced Logging**: Added detailed server logs to track image requests and responses
+- **CORS Headers**: Improved cross-origin support for Notion image fetching
+
+#### Progress Bar Fixes
+- **Accurate Counting**: Progress now correctly counts all processed files, not just first match
+- **Completion Detection**: Bar reaches 100% and rabbit stops at end on successful import
+- **Robust Parsing**: Handles multiple file log lines in single IPC message
+- **Error Recovery**: Maintains progress state even if parsing fails
+
+### 🖥️ GUI Enhancements
+- **Better Error Display**: Cleaner error messages with hover tooltips for full details
+- **Responsive Layout**: Improved spacing and visual hierarchy
+- **Progress Section**: Dedicated area that appears only during import
+- **Real-time Updates**: All progress elements update smoothly during operation
+
 ## [2.3] - 2025-10-15
 
 ### 🎯 Major Fixes
