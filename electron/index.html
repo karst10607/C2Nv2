@@ -44,6 +44,20 @@
           <small>Table rows with more columns will wrap into multiple column_lists</small>
         </div>
 
+        <div class="form-group">
+          <label for="preserve-layout">
+            <input type="checkbox" id="preserve-layout" checked>
+            Preserve Table Layout
+          </label>
+          <small>Add spacers to align columns with mixed image/text content</small>
+        </div>
+
+        <div class="form-group">
+          <label for="min-column-height">Min Column Height (blocks)</label>
+          <input type="number" id="min-column-height" value="3" min="1" max="10">
+          <small>Minimum height for table columns with images (helps alignment)</small>
+        </div>
+
         <div class="button-group">
           <button id="save-btn" class="btn-primary">Save Configuration</button>
           <button id="dry-run-btn" class="btn-secondary">Dry Run (Preview)</button>

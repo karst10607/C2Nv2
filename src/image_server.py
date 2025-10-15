@@ -22,6 +22,9 @@ class StaticServer:
     def _setup_routes(self):
         @self.app.route('/<path:filename>')
         def serve_file(filename):
+            # Flask's path converter includes query parameters in the filename
+            # We need to strip them for file serving
+            # Query parameters are already handled by Flask separately
             return send_from_directory(self.root, filename)
 
         @self.app.route('/')
@@ -59,6 +62,9 @@ class Tunnel:
             ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             # Parse stdout for trycloudflare URL
             self.public_url = self._wait_cloudflared_url(timeout=10)
+            if self.public_url:
+                # Wait for DNS to propagate and tunnel to be accessible
+                self._wait_for_tunnel_ready(self.public_url)
             return self.public_url or self.local_url
         # Fallback ngrok
         if shutil.which('ngrok'):
@@ -105,6 +111,31 @@ class Tunnel:
                 pass
             time.sleep(0.5)
         return None
+    
+    def _wait_for_tunnel_ready(self, url: str, timeout: int = 15) -> bool:
+        """Wait for tunnel URL to be accessible"""
+        import socket
+        end = time.time() + timeout
+        hostname = url.replace('https://', '').replace('http://', '').split('/')[0]
+        
+        # First wait for DNS to resolve
+        while time.time() < end:
+            try:
+                socket.gethostbyname(hostname)
+                break
+            except socket.gaierror:
+                time.sleep(1)
+        
+        # Then wait for HTTP to be accessible
+        while time.time() < end:
+            try:
+                r = requests.get(url, timeout=3)
+                if r.status_code == 200:
+                    return True
+            except Exception:
+                pass
+            time.sleep(1)
+        return False
 
     def stop(self):
         if self.proc and self.proc.poll() is None:

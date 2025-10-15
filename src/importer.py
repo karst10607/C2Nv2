@@ -57,7 +57,13 @@ def main(argv: Optional[list] = None):
     for f in html_files:
         ast = parse_html_file(f)
         title = ast['title']
-        blocks = to_notion_blocks(ast, image_base_url=public, max_cols=args.max_columns)
+        blocks = to_notion_blocks(
+            ast, 
+            image_base_url=public, 
+            max_cols=args.max_columns,
+            preserve_table_layout=True,
+            min_column_height=3
+        )
         print(f"- {f.name} -> {title} ({len(blocks)} blocks)")
         if args.run and notion:
             page_id = notion.create_page(parent_id, title)

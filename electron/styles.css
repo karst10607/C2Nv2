@@ -86,6 +86,16 @@ input[type="number"] {
   width: 100px;
 }
 
+input[type="checkbox"] {
+  width: auto;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+label input[type="checkbox"] {
+  cursor: pointer;
+}
+
 small {
   display: block;
   margin-top: 5px;

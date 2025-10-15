@@ -9,6 +9,8 @@ const notionTokenInput = document.getElementById('notion-token');
 const parentIdInput = document.getElementById('parent-id');
 const sourceDirInput = document.getElementById('source-dir');
 const maxColumnsInput = document.getElementById('max-columns');
+const preserveLayoutCheckbox = document.getElementById('preserve-layout');
+const minColumnHeightInput = document.getElementById('min-column-height');
 const testConnectionBtn = document.getElementById('test-connection');
 const connectionStatus = document.getElementById('connection-status');
 const browseBtn = document.getElementById('browse-btn');
@@ -25,6 +27,8 @@ const logOutput = document.getElementById('log-output');
   parentIdInput.value = currentConfig.PARENT_ID || '';
   sourceDirInput.value = currentConfig.SOURCE_DIR || '/home/koto/C2Nv2/work 2';
   maxColumnsInput.value = currentConfig.MAX_COLUMNS || 6;
+  preserveLayoutCheckbox.checked = currentConfig.PRESERVE_LAYOUT !== false; // Default true
+  minColumnHeightInput.value = currentConfig.MIN_COLUMN_HEIGHT || 3;
 })();
 
 // Test connection
@@ -93,7 +97,9 @@ saveBtn.addEventListener('click', async () => {
     NOTION_TOKEN: notionTokenInput.value.trim(),
     PARENT_ID: parentIdInput.value.trim(),
     SOURCE_DIR: sourceDirInput.value.trim(),
-    MAX_COLUMNS: parseInt(maxColumnsInput.value) || 6
+    MAX_COLUMNS: parseInt(maxColumnsInput.value) || 6,
+    PRESERVE_LAYOUT: preserveLayoutCheckbox.checked,
+    MIN_COLUMN_HEIGHT: parseInt(minColumnHeightInput.value) || 3
   };
 
   const result = await electronAPI.saveConfig(config);
@@ -147,7 +153,9 @@ async function runImport(dryRun) {
     NOTION_TOKEN: notionTokenInput.value.trim(),
     PARENT_ID: parentIdInput.value.trim(),
     SOURCE_DIR: sourceDirInput.value.trim(),
-    MAX_COLUMNS: parseInt(maxColumnsInput.value) || 6
+    MAX_COLUMNS: parseInt(maxColumnsInput.value) || 6,
+    PRESERVE_LAYOUT: preserveLayoutCheckbox.checked,
+    MIN_COLUMN_HEIGHT: parseInt(minColumnHeightInput.value) || 3
   };
 
   logOutput.textContent = '';
