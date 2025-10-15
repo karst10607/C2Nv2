@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Notion Importer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Notion Importer</h1>
+      <p class="subtitle">Import Confluence HTML exports into Notion</p>
+    </header>
+
+    <main>
+      <section class="config-section">
+        <h2>Configuration</h2>
+        
+        <div class="form-group">
+          <label for="notion-token">Notion Integration Token</label>
+          <input type="password" id="notion-token" placeholder="secret_...">
+          <button id="test-connection" class="btn-secondary">Test Connection</button>
+          <span id="connection-status"></span>
+        </div>
+
+        <div class="form-group">
+          <label for="parent-id">Parent Page/Database ID (optional)</label>
+          <input type="text" id="parent-id" placeholder="32-character hex ID">
+          <small>Leave empty to specify later with --parent-id flag</small>
+        </div>
+
+        <div class="form-group">
+          <label for="source-dir">Source HTML Folder</label>
+          <div class="input-with-button">
+            <input type="text" id="source-dir" placeholder="/path/to/confluence/export">
+            <button id="browse-btn" class="btn-secondary">Browse</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="max-columns">Max Columns per Row</label>
+          <input type="number" id="max-columns" value="6" min="1" max="20">
+          <small>Table rows with more columns will wrap into multiple column_lists</small>
+        </div>
+
+        <div class="button-group">
+          <button id="save-btn" class="btn-primary">Save Configuration</button>
+          <button id="dry-run-btn" class="btn-secondary">Dry Run (Preview)</button>
+          <button id="import-btn" class="btn-primary">Start Import</button>
+          <button id="stop-btn" class="btn-danger" style="display:none;">Stop</button>
+        </div>
+      </section>
+
+      <section class="log-section">
+        <h2>Import Log</h2>
+        <div id="log-output"></div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Config saved to: <code>~/.notion_importer/config.json</code></p>
+      <p>Mapping output: <code>out/mapping.jsonl</code></p>
+    </footer>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
