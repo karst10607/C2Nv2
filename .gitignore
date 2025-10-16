@@ -11,6 +11,8 @@ env/
 *.egg-info/
 dist/
 build/
+python_dist/
+bundled_tools/
 
 # Node.js
 node_modules/
