@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.4.5.1] - 2025-10-16
+## [2.4.6] - 2025-10-16
 
 ### Fixed
 - Remove hardcoded Linux path from default config; use empty string
