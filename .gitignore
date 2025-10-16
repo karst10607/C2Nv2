@@ -24,6 +24,10 @@ out/
 *.log
 electron.log
 
+# Large bundled binaries (ship via releases, not git)
+python_dist/
+bundled_tools/cloudflared-*
+
 # Config files with sensitive data
 .env
 config.json

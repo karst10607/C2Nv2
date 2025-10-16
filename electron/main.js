@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -20,7 +21,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js')
     },
     icon: path.join(__dirname, 'icon.png'),
-    title: 'Notion Importer 2.4.4'
+    title: 'Notion Importer'
   });
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
@@ -30,6 +31,16 @@ function createWindow() {
 }
 
 app.whenReady().then(createWindow);
+
+// Auto-update setup
+app.whenReady().then(() => {
+  try {
+    autoUpdater.autoDownload = true;
+    autoUpdater.checkForUpdatesAndNotify();
+  } catch (e) {
+    console.error('autoUpdater init failed:', e);
+  }
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

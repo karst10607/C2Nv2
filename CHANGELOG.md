@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.5] - 2025-10-16
+
+### Changed
+- Move large binaries out of git; add fetch script for tools
+- Add electron-updater and GitHub publish config
+- Bump app version to 2.4.5; clean product name/title
+
 ## [2.4] - 2025-10-15
 
 ### 🐰 Enhanced Progress Bar & Rabbit Animation
