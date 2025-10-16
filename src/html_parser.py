@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 # Minimal AST nodes
 # Node: { 'type': 'heading'|'paragraph'|'list'|'code'|'image'|'table', 'level', 'text', 'children', 'rows' }
 
+
 def parse_html_file(path: Path) -> Dict[str, Any]:
     html = Path(path).read_text(encoding='utf-8', errors='ignore')
     soup = BeautifulSoup(html, 'lxml')
@@ -30,10 +31,39 @@ def parse_html_file(path: Path) -> Dict[str, Any]:
                     blocks.append({'type': 'heading', 'level': min(3, int(name[1])), 'text': text})
                     processed.add(el)
             elif name == 'p':
-                text = el.get_text(" ", strip=True)
-                if text:
-                    blocks.append({'type': 'paragraph', 'text': text})
-                    processed.add(el)
+                # Capture paragraph text and any inline images within
+                imgs = list(el.find_all('img'))
+                # Prefer data-image-src over src; sanitize src by stripping query
+                def _img_src(img_el: Tag) -> str:
+                    src = img_el.get('data-image-src') or img_el.get('src')
+                    if not src:
+                        return ''
+                    if '?' in src:
+                        src = src.split('?')[0]
+                    return src
+                # Paragraph text (excluding img alt texts)
+                text_parts = []
+                for child in el.children:
+                    if isinstance(child, NavigableString):
+                        t = str(child).strip()
+                        if t:
+                            text_parts.append(t)
+                    elif isinstance(child, Tag) and child.name.lower() != 'img':
+                        t = child.get_text(" ", strip=True)
+                        if t:
+                            text_parts.append(t)
+                paragraph_text = " ".join([t for t in text_parts if t])
+                if paragraph_text:
+                    blocks.append({'type': 'paragraph', 'text': paragraph_text})
+                # Add inline images after the paragraph
+                for img in imgs:
+                    src = _img_src(img)
+                    # Ignore Confluence thumbnail placeholders; we'll rely on full-size images
+                    if src.startswith('attachments/thumbnails/'):
+                        continue
+                    if src:
+                        blocks.append({'type': 'image', 'src': src})
+                processed.add(el)
             elif name in ('ul', 'ol'):
                 items = []
                 for li in el.find_all('li', recursive=False):
@@ -46,11 +76,16 @@ def parse_html_file(path: Path) -> Dict[str, Any]:
                 blocks.append({'type': 'code', 'text': code_el.get_text("\n", strip=False)})
                 processed.add(el)
             elif name == 'img':
-                src = el.get('src')
+                # Prefer data-image-src if present; fall back to src
+                src = el.get('data-image-src') or el.get('src')
                 if src:
                     # Remove query parameters from image URLs
                     if '?' in src:
                         src = src.split('?')[0]
+                    # Skip Confluence-generated thumbnails (non-file endpoints)
+                    if src.startswith('attachments/thumbnails/'):
+                        processed.add(el)
+                        continue
                     blocks.append({'type': 'image', 'src': src})
                     processed.add(el)
             elif name == 'table':
@@ -66,16 +101,27 @@ def parse_html_file(path: Path) -> Dict[str, Any]:
                                 if t:
                                     cell_children.append({'type':'paragraph','text':t})
                             elif isinstance(c, Tag):
-                                if c.name == 'img' and c.get('src'):
-                                    src = c.get('src')
-                                    # Remove query parameters from image URLs
-                                    if '?' in src:
-                                        src = src.split('?')[0]
-                                    cell_children.append({'type':'image','src':src})
+                                if c.name == 'img':
+                                    # Prefer data-image-src if present; fall back to src
+                                    src = c.get('data-image-src') or c.get('src')
+                                    if src:
+                                        if '?' in src:
+                                            src = src.split('?')[0]
+                                        if not src.startswith('attachments/thumbnails/'):
+                                            cell_children.append({'type':'image','src':src})
                                 elif c.name in ('p','span','div'):
+                                    # Add text
                                     text = c.get_text(" ", strip=True)
                                     if text:
                                         cell_children.append({'type':'paragraph','text':text})
+                                    # Add any nested images
+                                    for img in c.find_all('img'):
+                                        src = img.get('data-image-src') or img.get('src')
+                                        if src:
+                                            if '?' in src:
+                                                src = src.split('?')[0]
+                                            if not src.startswith('attachments/thumbnails/'):
+                                                cell_children.append({'type':'image','src':src})
                                 elif c.name in ('ul','ol'):
                                     items = []
                                     for li in c.find_all('li', recursive=False):

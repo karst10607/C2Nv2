@@ -28,6 +28,9 @@ electron.log
 python_dist/
 bundled_tools/cloudflared-*
 
+# Test/sample HTML exports (too large for repo)
+EP/
+
 # Config files with sensitive data
 .env
 config.json
