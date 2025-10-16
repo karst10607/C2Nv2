@@ -8,7 +8,7 @@ from .config import AppConfig
 from .image_server import StaticServer, Tunnel
 from .html_parser import parse_html_file
 from .transform import to_notion_blocks
-from .notion_client import Notion
+from .notion_api import Notion
 
 
 def main(argv: Optional[list] = None):

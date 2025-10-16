@@ -1,11 +1,12 @@
 {
   "name": "notion-importer",
-  "version": "2.4.0",
+  "version": "2.4.4",
   "description": "Import Confluence HTML exports into Notion",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
-    "build:mac": "electron-builder --mac",
+    "build:py": "bash scripts/build_py.sh",
+    "build:mac": "npm run build:py && electron-builder --mac",
     "build:linux": "electron-builder --linux"
   },
   "keywords": ["notion", "confluence", "importer"],
@@ -17,11 +18,24 @@
   },
   "build": {
     "appId": "com.notionimporter.app",
-    "productName": "Notion Importer",
+    "productName": "Notion Importer 2.4.4",
     "directories": {
       "output": "dist"
     },
+    "extraResources": [
+      {
+        "from": "python_dist",
+        "to": "python_dist",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "bundled_tools",
+        "to": "bundled_tools",
+        "filter": ["cloudflared-*"]
+      }
+    ],
     "mac": {
+      "icon": "build/icon.icns",
       "category": "public.app-category.productivity",
       "target": ["dmg"]
     },

@@ -4,6 +4,8 @@ import socket
 import threading
 import time
 import re
+import os
+import platform
 from pathlib import Path
 from typing import Optional
 from flask import Flask, send_from_directory
@@ -55,10 +57,22 @@ class Tunnel:
         self.public_url: Optional[str] = None
 
     def start(self) -> str:
-        # Prefer cloudflared
-        if shutil.which('cloudflared'):
+        # Check for bundled cloudflared first (when running from packaged app)
+        cloudflared_cmd = self._find_cloudflared()
+        
+        # Check for system-installed tools
+        has_system_cloudflared = shutil.which('cloudflared')
+        has_ngrok = shutil.which('ngrok')
+        
+        if not cloudflared_cmd and not has_system_cloudflared and not has_ngrok:
+            print("[yellow]WARNING: No tunnel tool found (cloudflared or ngrok).[/yellow]")
+            print("[yellow]Images will be served from localhost and won't be accessible to Notion.[/yellow]")
+            print("[yellow]To fix: Install cloudflared with 'brew install cloudflared'[/yellow]")
+        
+        # Prefer bundled or system cloudflared
+        if cloudflared_cmd:
             self.proc = subprocess.Popen([
-                'cloudflared', 'tunnel', '--url', self.local_url, '--loglevel', 'info'
+                cloudflared_cmd, 'tunnel', '--url', self.local_url, '--loglevel', 'info'
             ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             # Parse stdout for trycloudflare URL
             self.public_url = self._wait_cloudflared_url(timeout=10)
@@ -67,7 +81,7 @@ class Tunnel:
                 self._wait_for_tunnel_ready(self.public_url)
             return self.public_url or self.local_url
         # Fallback ngrok
-        if shutil.which('ngrok'):
+        if has_ngrok:
             self.proc = subprocess.Popen(['ngrok', 'http', self.local_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             # Try local API to get tunnel public URL
             self.public_url = self._wait_ngrok_url(timeout=10)
@@ -137,6 +151,44 @@ class Tunnel:
             time.sleep(1)
         return False
 
+    def _find_cloudflared(self) -> Optional[str]:
+        """Find bundled cloudflared binary, checking both PyInstaller and Electron contexts"""
+        # Determine OS and architecture
+        is_linux = sys.platform.startswith('linux')
+        is_darwin = sys.platform == 'darwin'
+        arch = 'arm64' if platform.machine() in ('arm64', 'aarch64') else 'amd64'
+        
+        # Build binary name based on platform
+        if is_linux:
+            binary_name = f'cloudflared-linux-{arch}'
+        elif is_darwin:
+            binary_name = f'cloudflared-{arch}'
+        else:
+            binary_name = None
+        
+        # Check if running from PyInstaller bundle
+        if binary_name and getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            # Running from PyInstaller bundle
+            bundled = os.path.join(sys._MEIPASS, 'bundled_tools', binary_name)
+            if os.path.exists(bundled) and os.access(bundled, os.X_OK):
+                return bundled
+        
+        # Check if running from Electron app (via environment variable)
+        if binary_name and os.environ.get('ELECTRON_RUN_AS_NODE'):
+            # Try to find in app resources
+            app_path = os.environ.get('APP_RESOURCE_PATH')
+            if app_path:
+                bundled = os.path.join(app_path, 'bundled_tools', binary_name)
+                if os.path.exists(bundled) and os.access(bundled, os.X_OK):
+                    return bundled
+        
+        # Check for system-installed cloudflared
+        system_cf = shutil.which('cloudflared')
+        if system_cf:
+            return system_cf
+        
+        return None
+    
     def stop(self):
         if self.proc and self.proc.poll() is None:
             try:
