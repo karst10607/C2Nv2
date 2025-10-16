@@ -1,0 +1,7 @@
+notion-client==2.2.1
+beautifulsoup4==4.12.3
+lxml==5.2.2
+flask==3.0.3
+requests==2.32.3
+python-dotenv==1.0.1
+rich==13.7.1
