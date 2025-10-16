@@ -182,6 +182,23 @@ class Tunnel:
                 if os.path.exists(bundled) and os.access(bundled, os.X_OK):
                     return bundled
         
+        # Check for project-bundled tools in dev (project root)
+        project_root = Path(__file__).resolve().parents[1]
+        candidates = []
+        if binary_name:
+            # e.g. bundled_tools/cloudflared-arm64 on mac
+            candidates.append(project_root / 'bundled_tools' / binary_name)
+            # also support old naming if any
+            if is_darwin:
+                for name in (f'cloudflared-{arch}',):
+                    candidates.append(project_root / 'bundled_tools' / name)
+            if is_linux:
+                for name in (f'cloudflared-linux-{arch}',):
+                    candidates.append(project_root / 'bundled_tools' / name)
+        for c in candidates:
+            if c.exists() and os.access(str(c), os.X_OK):
+                return str(c)
+
         # Check for system-installed cloudflared
         system_cf = shutil.which('cloudflared')
         if system_cf:

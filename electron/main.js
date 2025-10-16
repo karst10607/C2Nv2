@@ -165,6 +165,8 @@ ipcMain.handle('start-import', async (event, config, dryRun) => {
       if (config.SOURCE_DIR) { pyArgs.push('--source-dir', config.SOURCE_DIR); }
       if (config.PARENT_ID) { pyArgs.push('--parent-id', config.PARENT_ID); }
       if (config.MAX_COLUMNS) { pyArgs.push('--max-columns', String(config.MAX_COLUMNS)); }
+      // Expose resource path so Python can find bundled tools during dev
+      env.APP_RESOURCE_PATH = projectDir;
       importProcess = spawn(pythonCmd, pyArgs, { cwd: projectDir, env });
     }
 

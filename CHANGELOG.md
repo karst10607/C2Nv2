@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.5.1] - 2025-10-16
+
+### Fixed
+- Remove hardcoded Linux path from default config; use empty string
+- Fix image parsing to prefer data-image-src and skip Confluence thumbnails
+- Add support for images nested in paragraphs and table cells
+
 ## [2.4.5] - 2025-10-16
 
 ### Changed

@@ -10,7 +10,7 @@ CONFIG_PATH = Path.home() / ".notion_importer" / "config.json"
 class AppConfig:
     notion_token: Optional[str] = None
     parent_id: Optional[str] = None
-    source_dir: str = "/home/koto/C2Nv2/work 2"
+    source_dir: str = ""
 
     @staticmethod
     def load(env: bool = True) -> "AppConfig":
