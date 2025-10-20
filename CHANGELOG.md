@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.7] - 2025-10-16
+
+### Added
+- Per-page image verification: polls Notion API to confirm images are cached before moving to next page
+- Image loading progress indicator with real-time count updates
+- Failed images tracking: saves pages with incomplete images to `out/failed_images.json`
+- Final import summary showing success/failure counts
+
+### Changed
+- Reduced default tunnel keepalive from 120s to 30s (images now verified per-page)
+- Enhanced logging: shows image count per page during import
+- Improved error handling with detailed warnings for timeout cases
+
+### Fixed
+- Images missing in imported pages due to insufficient wait time
+- No feedback when images fail to load from tunnel
+
 ## [2.4.6] - 2025-10-16
 
 ### Fixed
