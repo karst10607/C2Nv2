@@ -48,16 +48,18 @@ def verify_images_loaded(notion: Notion, page_id: str, expected_count: int, time
             for block in page_blocks:
                 if block.get('type') == 'image':
                     image_data = block.get('image', {})
-                    # Check if Notion has cached the image (external -> file)
+                    url = ''
+                    
+                    # Get URL from either 'file' or 'external' type
                     if image_data.get('type') == 'file':
                         url = image_data.get('file', {}).get('url', '')
-                        # Notion's cached images have notion.so or s3.us-west domains
-                        if any(domain in url for domain in ['notion.so', 's3.us-west', 'prod-files-secure']):
-                            loaded_count += 1
-                    # External images that haven't been cached yet
                     elif image_data.get('type') == 'external':
-                        # Still external, not cached yet
-                        pass
+                        url = image_data.get('external', {}).get('url', '')
+                    
+                    # Check if URL has been rewritten to Notion's CDN
+                    # (excludes tunnel URLs like trycloudflare.com)
+                    if url and any(domain in url for domain in ['notion.so', 's3.us-west', 'prod-files-secure', 's3.amazonaws.com']):
+                        loaded_count += 1
                 
                 # Check column_list children
                 if block.get('type') == 'column_list':
@@ -67,10 +69,17 @@ def verify_images_loaded(notion: Notion, page_id: str, expected_count: int, time
                             for child in notion.get_blocks(col_block['id']):
                                 if child.get('type') == 'image':
                                     image_data = child.get('image', {})
+                                    url = ''
+                                    
+                                    # Get URL from either 'file' or 'external' type
                                     if image_data.get('type') == 'file':
                                         url = image_data.get('file', {}).get('url', '')
-                                        if any(domain in url for domain in ['notion.so', 's3.us-west', 'prod-files-secure']):
-                                            loaded_count += 1
+                                    elif image_data.get('type') == 'external':
+                                        url = image_data.get('external', {}).get('url', '')
+                                    
+                                    # Check if URL has been rewritten to Notion's CDN
+                                    if url and any(domain in url for domain in ['notion.so', 's3.us-west', 'prod-files-secure', 's3.amazonaws.com']):
+                                        loaded_count += 1
             
             # Show progress if changed
             if loaded_count != last_count:

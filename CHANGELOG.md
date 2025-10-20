@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.8] - 2025-10-16
+
+### Fixed
+- False negatives in image verification: now checks both 'file' and 'external' type images
+- Images marked as failed even when successfully cached (Notion keeps some as external type)
+- Added s3.amazonaws.com to CDN domain detection
+
 ## [2.4.7] - 2025-10-16
 
 ### Added
