@@ -10,6 +10,7 @@ from .image_server import StaticServer, Tunnel
 from .html_parser import parse_html_file
 from .transform import to_notion_blocks
 from .notion_api import Notion
+from .database import ImportDatabase
 
 
 def count_images_in_blocks(blocks: List[Dict[str, Any]]) -> int:
@@ -144,6 +145,9 @@ def main(argv: Optional[list] = None):
     # Walk HTML files
     mapping_path = Path(__file__).resolve().parents[1] / 'out' / 'mapping.jsonl'
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Initialize database
+    db = ImportDatabase()
 
     html_files = sorted(Path(source_dir).rglob('*.html'))
     print(f"[cyan]Scanning {len(html_files)} HTML files...[/cyan]")
@@ -152,6 +156,7 @@ def main(argv: Optional[list] = None):
     total_blocks = 0
     total_images = 0
     page_stats = []
+    import_start_time = time.time()
     
     for f in html_files:
         ast = parse_html_file(f)
@@ -184,8 +189,19 @@ def main(argv: Optional[list] = None):
         print(f"  Est. time: ~{est_time // 60}m {est_time % 60}s")
     print(f"[green]{'═' * 22}[/green]\n")
     
+    # Start database tracking for this import run
+    run_id = None
+    if args.run:
+        from importlib.metadata import version as get_version
+        try:
+            app_version = get_version('notion-importer')
+        except:
+            app_version = '2.6.0'
+        run_id = db.start_import_run(app_version, len(html_files), total_images)
+    
     # Track pages with failed images
     failed_pages = []
+    verified_image_count = 0
 
     for page_info in page_stats:
         f = page_info['file']
@@ -201,6 +217,7 @@ def main(argv: Optional[list] = None):
             
             # Verify images are loaded before moving to next page
             images_ok = True
+            actual_verified = 0
             if image_count > 0:
                 # Give Notion's backend a head start before polling
                 print(f"  [dim]Waiting 10s for Notion to start fetching images...[/dim]")
@@ -208,29 +225,72 @@ def main(argv: Optional[list] = None):
                 
                 # Timeout scales with image count: 10s base + 8s per image
                 timeout = max(30, min(180, 10 + image_count * 8))  # 30s-180s range
+                
+                # Modified verify to return count
                 images_ok = verify_images_loaded(notion, page_id, image_count, timeout=timeout)
+                
+                # Count how many actually verified (for stats)
                 if not images_ok:
+                    # Re-check to get actual count
+                    try:
+                        page_blocks = notion.get_blocks(page_id)
+                        for block in page_blocks:
+                            if block.get('type') == 'image':
+                                img_data = block.get('image', {})
+                                url = ''
+                                if img_data.get('type') == 'file':
+                                    url = img_data.get('file', {}).get('url', '')
+                                elif img_data.get('type') == 'external':
+                                    url = img_data.get('external', {}).get('url', '')
+                                if url and any(d in url for d in ['notion.so', 's3.us-west', 'prod-files-secure', 's3.amazonaws.com']):
+                                    actual_verified += 1
+                    except:
+                        pass
+                    
+                    # Record in database
+                    db.add_failed_page(
+                        run_id=run_id,
+                        file_path=str(f),
+                        page_id=page_id,
+                        title=title,
+                        expected_images=image_count,
+                        verified_images=actual_verified,
+                        error=f'Verification timeout after {timeout}s'
+                    )
+                    
                     failed_pages.append({
                         'file': str(f),
                         'page_id': page_id,
                         'title': title,
                         'expected_images': image_count
                     })
+                else:
+                    actual_verified = image_count
+                    verified_image_count += image_count
             
             line = f"{{\"source\":\"{str(f)}\",\"page_id\":\"{page_id}\"}}\n"
             with open(mapping_path, 'a', encoding='utf-8') as fp:
                 fp.write(line)
 
-    # Report failed pages
+    # Finalize database run
+    if args.run and run_id:
+        duration = int(time.time() - import_start_time)
+        successful_pages = len(html_files) - len(failed_pages)
+        db.finish_import_run(run_id, successful_pages, verified_image_count, duration)
+    
+    # Export failed pages to JSON for compatibility
     if failed_pages:
         import json
         failed_path = Path(__file__).resolve().parents[1] / 'out' / 'failed_images.json'
-        with open(failed_path, 'w', encoding='utf-8') as fp:
-            json.dump(failed_pages, fp, indent=2, ensure_ascii=False)
-        print(f"\n[yellow]⚠ {len(failed_pages)} page(s) with incomplete images saved to:[/yellow]")
-        print(f"[yellow]  {failed_path}[/yellow]")
-        for page in failed_pages:
-            print(f"[yellow]  - {page['title']} (page_id: {page['page_id']})[/yellow]")
+        db.export_failed_to_json(failed_path)
+        
+        print(f"\n[yellow]⚠ {len(failed_pages)} page(s) with incomplete images:[/yellow]")
+        print(f"[yellow]  Database: {db.db_path}[/yellow]")
+        print(f"[yellow]  JSON export: {failed_path}[/yellow]")
+        for page in failed_pages[:10]:  # Show first 10
+            print(f"[yellow]  - {page['title']}[/yellow]")
+        if len(failed_pages) > 10:
+            print(f"[yellow]  ... and {len(failed_pages) - 10} more[/yellow]")
     
     # Keep tunnel alive after all imports
     # Even with verification, Notion may queue some images for later fetching
@@ -245,20 +305,21 @@ def main(argv: Optional[list] = None):
         time.sleep(keep_alive)
     
     tunnel.stop()
+    db.close()
     
     # Final summary
     if args.run:
         total_pages = len(html_files)
         success_pages = total_pages - len(failed_pages)
         failed_image_count = sum(p['expected_images'] for p in failed_pages)
-        success_images = total_images - failed_image_count
         
         print(f"\n[green]{'═' * 40}[/green]")
         print(f"[green]✓ Import Complete[/green]")
         print(f"  Pages:  {success_pages}/{total_pages} successful")
-        print(f"  Images: {success_images}/{total_images} verified")
+        print(f"  Images: {verified_image_count}/{total_images} verified")
         if failed_pages:
             print(f"[yellow]  {len(failed_pages)} page(s) with {failed_image_count} unverified images[/yellow]")
+            print(f"[cyan]  Run 'Auto-Retry Failed' in GUI to retry failed pages[/cyan]")
         print(f"[green]{'═' * 40}[/green]")
 
 if __name__ == '__main__':

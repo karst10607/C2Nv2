@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.0] - 2025-10-21
+
+### 🎉 Major Update: SQLite Database & Auto-Retry
+
+### Added
+- **SQLite database** for tracking import history and failed images
+  - Schema: `import_runs` and `failed_pages` tables with indexes
+  - Tracks: retry counts, timestamps, verification status, errors
+  - Scales to 1000+ pages and 500+ images
+- **Auto-Retry Failed button** in GUI
+  - Re-checks failed pages without re-importing
+  - Updates retry counts and status automatically
+  - Shows resolved vs still-failing pages
+- **Query capabilities:**
+  - Get pages that failed 3+ times
+  - Get pending retries
+  - Get import run history
+- **Database location:** `out/import_history.db`
+- **JSON export:** Still exports to `failed_images.json` for compatibility
+
+### Changed
+- Import tracking now uses SQLite instead of JSON-only
+- Failed pages include verified_images count and last_error details
+- Retry script: `python_tools/retry_failed.py`
+
+### Developer Benefits
+- Fast queries on large datasets (indexed)
+- Track improvement over multiple import runs
+- Identify persistent problem pages
+- Retry logic with exponential backoff built-in
+
 ## [2.5.3] - 2025-10-21
 
 ### Fixed
