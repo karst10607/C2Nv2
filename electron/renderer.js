@@ -17,6 +17,7 @@ const browseBtn = document.getElementById('browse-btn');
 const saveBtn = document.getElementById('save-btn');
 const dryRunBtn = document.getElementById('dry-run-btn');
 const importBtn = document.getElementById('import-btn');
+const retryBtn = document.getElementById('retry-btn');
 const stopBtn = document.getElementById('stop-btn');
 const logOutput = document.getElementById('log-output');
 
@@ -148,6 +149,16 @@ importBtn.addEventListener('click', async () => {
   }
 
   await runImport(false);
+});
+
+// Retry failed images
+retryBtn.addEventListener('click', async () => {
+  if (isImporting) return;
+  
+  const confirmed = confirm('This will check all previously failed pages and retry verification. Continue?');
+  if (!confirmed) return;
+  
+  await runRetry();
 });
 
 // Stop import
@@ -321,6 +332,32 @@ function formatTime(seconds) {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
+// Run retry
+async function runRetry() {
+  if (isImporting) return;
+  
+  logOutput.textContent = '';
+  isImporting = true;
+  importBtn.disabled = true;
+  dryRunBtn.disabled = true;
+  retryBtn.disabled = true;
+  
+  appendLog('Starting retry of failed images...\n\n');
+  
+  const result = await electronAPI.retryFailed();
+  
+  importBtn.disabled = false;
+  dryRunBtn.disabled = false;
+  retryBtn.disabled = false;
+  isImporting = false;
+  
+  if (result.success) {
+    appendLog('\n✓ Retry completed!\n');
+  } else {
+    appendLog('\n✗ Retry failed: ' + (result.error || 'Unknown error') + '\n');
+  }
 }
 
 })(); // End of IIFE

@@ -195,6 +195,12 @@ button {
   color: white;
 }
 
+.btn-warning {
+  background: linear-gradient(135deg, #ffa751 0%, #ffe259 100%);
+  color: #333;
+  font-weight: 600;
+}
+
 .btn-danger:hover {
   background: #c0392b;
 }

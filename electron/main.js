@@ -200,6 +200,54 @@ ipcMain.handle('start-import', async (event, config, dryRun) => {
   });
 });
 
+ipcMain.handle('retry-failed', async () => {
+  return new Promise((resolve) => {
+    const projectDir = path.join(__dirname, '..');
+    let cmd, args = [];
+    const env = { ...process.env };
+    
+    if (app.isPackaged) {
+      // Use packaged retry binary (we'd need to build this)
+      cmd = path.join(process.resourcesPath, 'python_dist', 'retry_failed');
+      env.APP_RESOURCE_PATH = process.resourcesPath;
+    } else {
+      // Dev: python -m python_tools.retry_failed
+      const venvPython = path.join(projectDir, '.venv', 'bin', 'python3');
+      const pythonCmd = fs.existsSync(venvPython) ? venvPython : 'python3';
+      cmd = pythonCmd;
+      args = [path.join(projectDir, 'python_tools', 'retry_failed.py')];
+      env.APP_RESOURCE_PATH = projectDir;
+    }
+    
+    const retryProcess = spawn(cmd, args, { cwd: projectDir, env });
+    let output = '';
+    
+    retryProcess.stdout.on('data', (data) => {
+      const text = data.toString();
+      output += text;
+      mainWindow.webContents.send('import-log', text);
+    });
+    
+    retryProcess.stderr.on('data', (data) => {
+      const text = data.toString();
+      output += text;
+      mainWindow.webContents.send('import-log', text);
+    });
+    
+    retryProcess.on('close', (code) => {
+      if (code === 0) {
+        resolve({ success: true, output });
+      } else {
+        resolve({ success: false, error: `Process exited with code ${code}`, output });
+      }
+    });
+    
+    retryProcess.on('error', (err) => {
+      resolve({ success: false, error: err.message });
+    });
+  });
+});
+
 ipcMain.handle('stop-import', async () => {
   if (importProcess) {
     importProcess.kill();
