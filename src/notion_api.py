@@ -5,6 +5,8 @@ from notion_client import Client
 class Notion:
     def __init__(self, token: str):
         self.client = Client(auth=token)
+        self.last_api_call = 0
+        self.min_interval = 0.35  # ~3 requests/sec with safety margin
 
     def search_parents(self, query: str) -> List[Dict[str, Any]]:
         res = self.client.search(query=query, page_size=20)
@@ -40,10 +42,18 @@ class Notion:
         
         return all_blocks
 
-    @staticmethod
-    def _retry(fn, retries: int = 5, base: float = 0.8):
+    def _throttle(self):
+        """Enforce rate limiting: ~3 requests/sec"""
+        now = time.time()
+        elapsed = now - self.last_api_call
+        if elapsed < self.min_interval:
+            time.sleep(self.min_interval - elapsed)
+        self.last_api_call = time.time()
+    
+    def _retry(self, fn, retries: int = 5, base: float = 0.8):
         for attempt in range(retries):
             try:
+                self._throttle()  # Rate limit before each API call
                 return fn()
             except Exception as e:
                 if attempt == retries - 1:
