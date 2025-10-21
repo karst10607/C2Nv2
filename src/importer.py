@@ -146,14 +146,15 @@ def main(argv: Optional[list] = None):
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
 
     html_files = sorted(Path(source_dir).rglob('*.html'))
-    print(f"Found {len(html_files)} html files")
+    print(f"[cyan]Scanning {len(html_files)} HTML files...[/cyan]")
     
-    # Track pages with failed images
-    failed_pages = []
-
+    # Pre-scan to get totals
+    total_blocks = 0
+    total_images = 0
+    page_stats = []
+    
     for f in html_files:
         ast = parse_html_file(f)
-        title = ast['title']
         blocks = to_notion_blocks(
             ast, 
             image_base_url=public, 
@@ -161,8 +162,37 @@ def main(argv: Optional[list] = None):
             preserve_table_layout=True,
             min_column_height=3
         )
-        
         image_count = count_images_in_blocks(blocks)
+        total_blocks += len(blocks)
+        total_images += image_count
+        
+        page_stats.append({
+            'file': f,
+            'title': ast['title'],
+            'ast': ast,
+            'blocks': blocks,
+            'image_count': image_count
+        })
+    
+    # Show summary before importing
+    print(f"\n[green]═══ Import Summary ═══[/green]")
+    print(f"  Pages:  {len(html_files)}")
+    print(f"  Blocks: {total_blocks}")
+    print(f"  Images: {total_images}")
+    if args.run:
+        est_time = len(html_files) * 15 + total_images * 8  # Rough estimate
+        print(f"  Est. time: ~{est_time // 60}m {est_time % 60}s")
+    print(f"[green]{'═' * 22}[/green]\n")
+    
+    # Track pages with failed images
+    failed_pages = []
+
+    for page_info in page_stats:
+        f = page_info['file']
+        title = page_info['title']
+        blocks = page_info['blocks']
+        image_count = page_info['image_count']
+        
         print(f"- {f.name} -> {title} ({len(blocks)} blocks, {image_count} images)")
         
         if args.run and notion:
@@ -213,11 +243,18 @@ def main(argv: Optional[list] = None):
     
     # Final summary
     if args.run:
-        total = len(html_files)
-        success = total - len(failed_pages)
-        print(f"\n[green]✓ Import complete: {success}/{total} pages with all images verified[/green]")
+        total_pages = len(html_files)
+        success_pages = total_pages - len(failed_pages)
+        failed_image_count = sum(p['expected_images'] for p in failed_pages)
+        success_images = total_images - failed_image_count
+        
+        print(f"\n[green]{'═' * 40}[/green]")
+        print(f"[green]✓ Import Complete[/green]")
+        print(f"  Pages:  {success_pages}/{total_pages} successful")
+        print(f"  Images: {success_images}/{total_images} verified")
         if failed_pages:
-            print(f"[yellow]  {len(failed_pages)} page(s) need manual image check[/yellow]")
+            print(f"[yellow]  {len(failed_pages)} page(s) with {failed_image_count} unverified images[/yellow]")
+        print(f"[green]{'═' * 40}[/green]")
 
 if __name__ == '__main__':
     sys.exit(main())
