@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.1] - 2025-10-21
+
+### Added
+- GUI now displays pre-scan summary with pages, blocks, images, and estimated time
+- Summary shown before import starts for better planning
+- Visual summary cards in Electron interface
+
 ## [2.5.0] - 2025-10-16
 
 ### Added
