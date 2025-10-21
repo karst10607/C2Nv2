@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.3] - 2025-10-21
+
+### Fixed
+- Filter out UI icons and avatars (JIRA icons, emoticons, bullets) from image import
+- Apply icon filters to all image capture points: standalone, paragraphs, table cells
+- Reduce false positive image counts from UI elements
+- Images showing as "unverified" were actually icon URLs that shouldn't be imported
+
+### Changed
+- More comprehensive image filtering across all HTML contexts
+
 ## [2.5.2] - 2025-10-21
 
 ### Fixed
