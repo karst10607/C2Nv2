@@ -14,6 +14,7 @@ sys.path.insert(0, str(project_root))
 from src.config import AppConfig
 from src.database import ImportDatabase
 from src.notion_api import Notion
+from src.verification import ImageVerifier
 from rich import print
 
 
@@ -30,6 +31,7 @@ def retry_failed_images(max_retry_count: int = 3):
         return 1
     
     notion = Notion(cfg.notion_token)
+    verifier = ImageVerifier(notion)
     
     # Get pages needing retry
     pending = db.get_pending_retries(max_retry_count=max_retry_count)
@@ -56,38 +58,9 @@ def retry_failed_images(max_retry_count: int = 3):
         print(f"  Expected: {expected}, Previously verified: {verified}, Retries: {retry_count}")
         
         try:
-            # Fetch current state from Notion
+            # Fetch current state from Notion and count verified images
             page_blocks = notion.get_blocks(page_id)
-            
-            # Count verified images
-            current_verified = 0
-            for block in page_blocks:
-                if block.get('type') == 'image':
-                    img_data = block.get('image', {})
-                    url = ''
-                    if img_data.get('type') == 'file':
-                        url = img_data.get('file', {}).get('url', '')
-                    elif img_data.get('type') == 'external':
-                        url = img_data.get('external', {}).get('url', '')
-                    
-                    # Check if cached by Notion
-                    if url and any(d in url for d in ['notion.so', 's3.us-west', 'prod-files-secure', 's3.amazonaws.com']):
-                        current_verified += 1
-                
-                # Check column_list children
-                if block.get('type') == 'column_list':
-                    for col_block in notion.get_blocks(block['id']):
-                        if col_block.get('type') == 'column':
-                            for child in notion.get_blocks(col_block['id']):
-                                if child.get('type') == 'image':
-                                    img_data = child.get('image', {})
-                                    url = ''
-                                    if img_data.get('type') == 'file':
-                                        url = img_data.get('file', {}).get('url', '')
-                                    elif img_data.get('type') == 'external':
-                                        url = img_data.get('external', {}).get('url', '')
-                                    if url and any(d in url for d in ['notion.so', 's3.us-west', 'prod-files-secure', 's3.amazonaws.com']):
-                                        current_verified += 1
+            current_verified = verifier.count_verified_images_in_blocks(page_blocks)
             
             # Check if resolved
             if current_verified >= expected:

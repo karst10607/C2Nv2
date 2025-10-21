@@ -11,6 +11,7 @@ from .html_parser import parse_html_file
 from .transform import to_notion_blocks
 from .notion_api import Notion
 from .database import ImportDatabase
+from .verification import ImageVerifier
 
 
 def count_images_in_blocks(blocks: List[Dict[str, Any]]) -> int:
@@ -27,83 +28,7 @@ def count_images_in_blocks(blocks: List[Dict[str, Any]]) -> int:
     return count
 
 
-def verify_images_loaded(notion: Notion, page_id: str, expected_count: int, timeout: int = 60) -> bool:
-    """
-    Poll Notion API to verify that images have been fetched and cached.
-    Returns True if all images are loaded, False if timeout.
-    """
-    if expected_count == 0:
-        return True
-    
-    print(f"  [cyan]Verifying {expected_count} images...[/cyan]", end='', flush=True)
-    start = time.time()
-    last_count = 0
-    
-    while time.time() - start < timeout:
-        try:
-            # Fetch blocks from Notion
-            page_blocks = notion.get_blocks(page_id)
-            
-            # Count images that have been cached (URL changed to Notion's CDN)
-            loaded_count = 0
-            for block in page_blocks:
-                if block.get('type') == 'image':
-                    image_data = block.get('image', {})
-                    url = ''
-                    
-                    # Get URL from either 'file' or 'external' type
-                    if image_data.get('type') == 'file':
-                        url = image_data.get('file', {}).get('url', '')
-                    elif image_data.get('type') == 'external':
-                        url = image_data.get('external', {}).get('url', '')
-                    
-                    # Check if URL has been rewritten to Notion's CDN
-                    # (excludes tunnel URLs like trycloudflare.com)
-                    if url and any(domain in url for domain in ['notion.so', 's3.us-west', 'prod-files-secure', 's3.amazonaws.com']):
-                        loaded_count += 1
-                
-                # Check column_list children
-                if block.get('type') == 'column_list':
-                    # Need to fetch column children separately
-                    for col_block in notion.get_blocks(block['id']):
-                        if col_block.get('type') == 'column':
-                            for child in notion.get_blocks(col_block['id']):
-                                if child.get('type') == 'image':
-                                    image_data = child.get('image', {})
-                                    url = ''
-                                    
-                                    # Get URL from either 'file' or 'external' type
-                                    if image_data.get('type') == 'file':
-                                        url = image_data.get('file', {}).get('url', '')
-                                    elif image_data.get('type') == 'external':
-                                        url = image_data.get('external', {}).get('url', '')
-                                    
-                                    # Check if URL has been rewritten to Notion's CDN
-                                    if url and any(domain in url for domain in ['notion.so', 's3.us-west', 'prod-files-secure', 's3.amazonaws.com']):
-                                        loaded_count += 1
-            
-            # Show progress if changed
-            if loaded_count != last_count:
-                print(f"\r  [cyan]Verifying images: {loaded_count}/{expected_count}[/cyan]", end='', flush=True)
-                last_count = loaded_count
-            
-            # Success if all loaded
-            if loaded_count >= expected_count:
-                elapsed = int(time.time() - start)
-                print(f"\r  [green]✓ All {loaded_count} images verified ({elapsed}s)[/green]")
-                return True
-            
-            # Wait before next poll (longer to respect rate limits)
-            time.sleep(5)
-            
-        except Exception as e:
-            print(f"\r  [yellow]Warning during verification: {e}[/yellow]")
-            time.sleep(5)
-    
-    # Timeout
-    elapsed = int(time.time() - start)
-    print(f"\r  [yellow]⚠ Timeout: {last_count}/{expected_count} images verified ({elapsed}s)[/yellow]")
-    return False
+# Removed: verify_images_loaded() - now in verification.py as ImageVerifier.verify_page_images()
 
 
 def main(argv: Optional[list] = None):
@@ -139,8 +64,10 @@ def main(argv: Optional[list] = None):
             print('[yellow]PARENT_ID missing. You can run --dry-run to preview or set it via GUI.[/yellow]')
             return 2
         notion = Notion(token)
+        verifier = ImageVerifier(notion)
     else:
         notion = None  # type: ignore
+        verifier = None  # type: ignore
 
     # Walk HTML files
     mapping_path = Path(__file__).resolve().parents[1] / 'out' / 'mapping.jsonl'
@@ -226,28 +153,13 @@ def main(argv: Optional[list] = None):
                 # Timeout scales with image count: 10s base + 8s per image
                 timeout = max(30, min(180, 10 + image_count * 8))  # 30s-180s range
                 
-                # Modified verify to return count
-                images_ok = verify_images_loaded(notion, page_id, image_count, timeout=timeout)
+                # Verify using ImageVerifier
+                images_ok, actual_verified = verifier.verify_page_images(
+                    page_id, image_count, timeout=timeout, poll_interval=5
+                )
                 
-                # Count how many actually verified (for stats)
+                # Record failures in database
                 if not images_ok:
-                    # Re-check to get actual count
-                    try:
-                        page_blocks = notion.get_blocks(page_id)
-                        for block in page_blocks:
-                            if block.get('type') == 'image':
-                                img_data = block.get('image', {})
-                                url = ''
-                                if img_data.get('type') == 'file':
-                                    url = img_data.get('file', {}).get('url', '')
-                                elif img_data.get('type') == 'external':
-                                    url = img_data.get('external', {}).get('url', '')
-                                if url and any(d in url for d in ['notion.so', 's3.us-west', 'prod-files-secure', 's3.amazonaws.com']):
-                                    actual_verified += 1
-                    except:
-                        pass
-                    
-                    # Record in database
                     db.add_failed_page(
                         run_id=run_id,
                         file_path=str(f),
