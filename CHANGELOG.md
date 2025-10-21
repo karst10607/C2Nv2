@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.0] - 2025-10-16
+
+### Added
+- Pre-scan all HTML files before importing to show total statistics upfront
+- Import summary shows: total pages, blocks, images, and estimated time
+- Final summary shows success/failure counts for both pages and images
+
+### Changed
+- Parse HTML files only once (pre-scan) instead of during import loop
+- More informative progress display with running totals
+
 ## [2.4.9] - 2025-10-16
 
 ### Added
