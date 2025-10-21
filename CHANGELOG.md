@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.9] - 2025-10-16
+
+### Added
+- API rate limiting throttle: enforces ~3 requests/sec to prevent Notion rate limit errors
+- Dynamic timeout scaling: 10s + 8s per image (max 180s) for large pages
+- Initial 10s wait before verification to let Notion backend start processing
+
+### Changed
+- Increased poll interval from 3s to 5s to reduce API call frequency
+- Better rate limit handling in verification loop
+
+### Fixed
+- Random image verification failures due to Notion API rate limiting
+- Timeout too short for pages with many images (14+ images)
+- Aggressive polling causing cached/stale responses from Notion API
+
 ## [2.4.8] - 2025-10-16
 
 ### Fixed

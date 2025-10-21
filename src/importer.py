@@ -92,8 +92,8 @@ def verify_images_loaded(notion: Notion, page_id: str, expected_count: int, time
                 print(f"\r  [green]✓ All {loaded_count} images verified ({elapsed}s)[/green]")
                 return True
             
-            # Wait before next poll
-            time.sleep(3)
+            # Wait before next poll (longer to respect rate limits)
+            time.sleep(5)
             
         except Exception as e:
             print(f"\r  [yellow]Warning during verification: {e}[/yellow]")
@@ -172,7 +172,13 @@ def main(argv: Optional[list] = None):
             # Verify images are loaded before moving to next page
             images_ok = True
             if image_count > 0:
-                images_ok = verify_images_loaded(notion, page_id, image_count, timeout=60)
+                # Give Notion's backend a head start before polling
+                print(f"  [dim]Waiting 10s for Notion to start fetching images...[/dim]")
+                time.sleep(10)
+                
+                # Timeout scales with image count: 10s base + 8s per image
+                timeout = max(30, min(180, 10 + image_count * 8))  # 30s-180s range
+                images_ok = verify_images_loaded(notion, page_id, image_count, timeout=timeout)
                 if not images_ok:
                     failed_pages.append({
                         'file': str(f),

@@ -1,6 +1,6 @@
 {
   "name": "notion-importer",
-  "version": "2.4.8",
+  "version": "2.4.9",
   "description": "Import Confluence HTML exports into Notion",
   "main": "electron/main.js",
   "scripts": {
