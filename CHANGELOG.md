@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.2] - 2025-10-21
+
+### Fixed
+- **CRITICAL:** Increased tunnel keepalive from 30s to 180s (3 minutes)
+- Images not loading because tunnel closed before Notion backend fetched them
+- Notion queues image fetching asynchronously, needs longer tunnel lifetime
+- Verification checks if fetched but doesn't keep tunnel alive long enough
+
+### Changed
+- Default IMAGE_TUNNEL_KEEPALIVE_SEC: 30s → 180s
+
 ## [2.5.1] - 2025-10-21
 
 ### Added
