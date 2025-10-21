@@ -2,6 +2,8 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 from pathlib import Path
 from typing import Any, Dict, List
 
+from .image_utils import should_skip_image, extract_image_src
+
 # Minimal AST nodes
 # Node: { 'type': 'heading'|'paragraph'|'list'|'code'|'image'|'table', 'level', 'text', 'children', 'rows' }
 
@@ -33,14 +35,7 @@ def parse_html_file(path: Path) -> Dict[str, Any]:
             elif name == 'p':
                 # Capture paragraph text and any inline images within
                 imgs = list(el.find_all('img'))
-                # Prefer data-image-src over src; sanitize src by stripping query
-                def _img_src(img_el: Tag) -> str:
-                    src = img_el.get('data-image-src') or img_el.get('src')
-                    if not src:
-                        return ''
-                    if '?' in src:
-                        src = src.split('?')[0]
-                    return src
+                
                 # Paragraph text (excluding img alt texts)
                 text_parts = []
                 for child in el.children:
@@ -55,29 +50,13 @@ def parse_html_file(path: Path) -> Dict[str, Any]:
                 paragraph_text = " ".join([t for t in text_parts if t])
                 if paragraph_text:
                     blocks.append({'type': 'paragraph', 'text': paragraph_text})
+                
                 # Add inline images after the paragraph
                 for img in imgs:
-                    # Skip UI icons by class name
-                    img_class = img.get('class', [])
-                    if isinstance(img_class, list):
-                        img_class = ' '.join(img_class)
-                    if any(x in str(img_class) for x in ['icon', 'emoticon', 'bullet']):
-                        continue
-                    
-                    src = _img_src(img)
-                    if not src:
-                        continue
-                    # Ignore Confluence thumbnail placeholders
-                    if src.startswith('attachments/thumbnails/'):
-                        continue
-                    # Skip UI icons and avatars by URL pattern
-                    if any(x in src for x in ['/universal_avatar/', '/icons/', 'emoticons/']):
-                        continue
-                    # Skip tiny gifs
-                    if src.endswith('.gif'):
-                        continue
-                    
-                    blocks.append({'type': 'image', 'src': src})
+                    src = extract_image_src(img)
+                    if src and not should_skip_image(img, src):
+                        blocks.append({'type': 'image', 'src': src})
+                
                 processed.add(el)
             elif name in ('ul', 'ol'):
                 items = []
@@ -91,34 +70,10 @@ def parse_html_file(path: Path) -> Dict[str, Any]:
                 blocks.append({'type': 'code', 'text': code_el.get_text("\n", strip=False)})
                 processed.add(el)
             elif name == 'img':
-                # Skip UI icons by class name
-                img_class = el.get('class', [])
-                if isinstance(img_class, list):
-                    img_class = ' '.join(img_class)
-                if any(x in str(img_class) for x in ['icon', 'emoticon', 'bullet']):
-                    processed.add(el)
-                    continue
-                
-                # Prefer data-image-src if present; fall back to src
-                src = el.get('data-image-src') or el.get('src')
-                if src:
-                    # Remove query parameters from image URLs
-                    if '?' in src:
-                        src = src.split('?')[0]
-                    # Skip Confluence-generated thumbnails (non-file endpoints)
-                    if src.startswith('attachments/thumbnails/'):
-                        processed.add(el)
-                        continue
-                    # Skip UI icons and avatars by URL pattern
-                    if any(x in src for x in ['/universal_avatar/', '/icons/', 'emoticons/']):
-                        processed.add(el)
-                        continue
-                    # Skip tiny gifs (usually UI elements)
-                    if src.endswith('.gif'):
-                        processed.add(el)
-                        continue
+                src = extract_image_src(el)
+                if src and not should_skip_image(el, src):
                     blocks.append({'type': 'image', 'src': src})
-                    processed.add(el)
+                processed.add(el)
             elif name == 'table':
                 rows = []
                 for tr in el.find_all('tr', recursive=True):
@@ -133,24 +88,8 @@ def parse_html_file(path: Path) -> Dict[str, Any]:
                                     cell_children.append({'type':'paragraph','text':t})
                             elif isinstance(c, Tag):
                                 if c.name == 'img':
-                                    # Skip UI icons by class
-                                    img_class = c.get('class', [])
-                                    if isinstance(img_class, list):
-                                        img_class = ' '.join(img_class)
-                                    if any(x in str(img_class) for x in ['icon', 'emoticon', 'bullet']):
-                                        continue
-                                    
-                                    # Prefer data-image-src if present; fall back to src
-                                    src = c.get('data-image-src') or c.get('src')
-                                    if src:
-                                        if '?' in src:
-                                            src = src.split('?')[0]
-                                        if src.startswith('attachments/thumbnails/'):
-                                            continue
-                                        if any(x in src for x in ['/universal_avatar/', '/icons/', 'emoticons/']):
-                                            continue
-                                        if src.endswith('.gif'):
-                                            continue
+                                    src = extract_image_src(c)
+                                    if src and not should_skip_image(c, src):
                                         cell_children.append({'type':'image','src':src})
                                 elif c.name in ('p','span','div'):
                                     # Add text
@@ -159,23 +98,8 @@ def parse_html_file(path: Path) -> Dict[str, Any]:
                                         cell_children.append({'type':'paragraph','text':text})
                                     # Add any nested images
                                     for img in c.find_all('img'):
-                                        # Skip UI icons by class
-                                        img_class = img.get('class', [])
-                                        if isinstance(img_class, list):
-                                            img_class = ' '.join(img_class)
-                                        if any(x in str(img_class) for x in ['icon', 'emoticon', 'bullet']):
-                                            continue
-                                        
-                                        src = img.get('data-image-src') or img.get('src')
-                                        if src:
-                                            if '?' in src:
-                                                src = src.split('?')[0]
-                                            if src.startswith('attachments/thumbnails/'):
-                                                continue
-                                            if any(x in src for x in ['/universal_avatar/', '/icons/', 'emoticons/']):
-                                                continue
-                                            if src.endswith('.gif'):
-                                                continue
+                                        src = extract_image_src(img)
+                                        if src and not should_skip_image(img, src):
                                             cell_children.append({'type':'image','src':src})
                                 elif c.name in ('ul','ol'):
                                     items = []

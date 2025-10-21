@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.6.1] - 2025-10-21
+
+### 🔧 Code Refactoring (Option A Quick Refactor)
+
+### Added
+- **src/image_utils.py**: Centralized image filtering utilities
+  - `should_skip_image()`: Single source of truth for filtering
+  - `extract_image_src()`: Normalize image URLs
+  - `is_content_image()`: Check if image is actual content
+- **src/verification.py**: ImageVerifier class for clean verification logic
+  - `verify_page_images()`: Returns (success, verified_count)
+  - `count_verified_images_in_blocks()`: Extracted nested loop logic
+  - Easier to test and maintain
+
+### Changed
+- **html_parser.py**: Reduced from 195 → 115 lines (-80 lines, -41%)
+  - Uses image_utils for all image filtering
+  - No more code duplication (was in 3 places)
+  - Single fix applies everywhere
+- **importer.py**: Reduced from 326 → 253 lines (-73 lines, -22%)
+  - Uses ImageVerifier for verification
+  - Cleaner main() function
+  - Better separation of concerns
+- **python_tools/retry_failed.py**: Uses ImageVerifier
+
+### Removed
+- Duplicated icon filtering logic (3 copies → 1 utility function)
+- Complex nested verification loops (→ ImageVerifier class)
+
+### Benefits
+- ✅ Fix bugs once, works everywhere
+- ✅ Easier to test (utilities are isolated)
+- ✅ Easier to add features (clear responsibilities)
+- ✅ Better maintainability for 1000+ page imports
+
 ## [2.6.0] - 2025-10-21
 
 ### 🎉 Major Update: SQLite Database & Auto-Retry
