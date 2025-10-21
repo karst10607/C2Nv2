@@ -232,11 +232,16 @@ def main(argv: Optional[list] = None):
         for page in failed_pages:
             print(f"[yellow]  - {page['title']} (page_id: {page['page_id']})[/yellow]")
     
-    # Keep tunnel alive briefly after all imports (images should already be cached)
+    # Keep tunnel alive after all imports
+    # Even with verification, Notion may queue some images for later fetching
     if not args.dry_run:
         import os
-        keep_alive = int(os.environ.get('IMAGE_TUNNEL_KEEPALIVE_SEC', '30'))
-        print(f"\n[green]Keeping tunnel alive for {keep_alive} seconds as safety buffer...[/green]")
+        # Default 180s (3 min) to ensure Notion backend has time to fetch queued images
+        keep_alive = int(os.environ.get('IMAGE_TUNNEL_KEEPALIVE_SEC', '180'))
+        if failed_pages:
+            print(f"\n[yellow]Keeping tunnel alive for {keep_alive}s for failed images...[/yellow]")
+        else:
+            print(f"\n[green]Keeping tunnel alive for {keep_alive}s as safety buffer...[/green]")
         time.sleep(keep_alive)
     
     tunnel.stop()
