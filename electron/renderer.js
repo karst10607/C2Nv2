@@ -20,6 +20,13 @@ const importBtn = document.getElementById('import-btn');
 const stopBtn = document.getElementById('stop-btn');
 const logOutput = document.getElementById('log-output');
 
+// Summary elements
+const summarySection = document.getElementById('summary-section');
+const summaryPages = document.getElementById('summary-pages');
+const summaryBlocks = document.getElementById('summary-blocks');
+const summaryImages = document.getElementById('summary-images');
+const summaryTime = document.getElementById('summary-time');
+
 // Progress elements
 const progressSection = document.getElementById('progress-section');
 const progressFill = document.getElementById('progress-fill');
@@ -235,17 +242,36 @@ function appendLog(text) {
 
 // Parse progress from log output
 function parseProgress(text) {
-  // Look for "Found X html files"
-  const foundMatch = text.match(/Found (\d+) html files/);
-  if (foundMatch) {
-    totalFiles = parseInt(foundMatch[1]);
+  // Look for "Scanning X HTML files..."
+  const scanMatch = text.match(/Scanning (\d+) HTML files/);
+  if (scanMatch) {
+    totalFiles = parseInt(scanMatch[1]);
     processedFiles = 0;
     updateProgress();
   }
   
-  // Look for file processing "- filename.html -> Title (X blocks)"
+  // Look for Import Summary section
+  const pagesMatch = text.match(/Pages:\s+(\d+)/);
+  const blocksMatch = text.match(/Blocks:\s+(\d+)/);
+  const imagesMatch = text.match(/Images:\s+(\d+)/);
+  const timeMatch = text.match(/Est\. time:\s+~(\d+)m\s+(\d+)s/);
+  
+  if (pagesMatch || blocksMatch || imagesMatch) {
+    summarySection.style.display = 'block';
+    
+    if (pagesMatch) summaryPages.textContent = pagesMatch[1];
+    if (blocksMatch) summaryBlocks.textContent = blocksMatch[1];
+    if (imagesMatch) summaryImages.textContent = imagesMatch[1];
+    if (timeMatch) {
+      const mins = parseInt(timeMatch[1]);
+      const secs = parseInt(timeMatch[2]);
+      summaryTime.textContent = `${mins}m ${secs}s`;
+    }
+  }
+  
+  // Look for file processing "- filename.html -> Title (X blocks, X images)"
   // Count ALL matches in the chunk, not just presence
-  const fileMatches = text.match(/^- .+\.html -> .+ \(\d+ blocks\)/mg);
+  const fileMatches = text.match(/^- .+\.html -> .+ \(\d+ blocks, \d+ images\)/mg);
   if (fileMatches && fileMatches.length) {
     processedFiles += fileMatches.length;
     // Clamp to totalFiles to avoid going over on noisy logs
