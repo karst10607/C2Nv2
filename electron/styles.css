@@ -86,6 +86,76 @@ main {
   color: #667eea;
 }
 
+.upload-config {
+  margin-top: 15px;
+  margin-bottom: 20px;
+}
+
+.config-card {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 15px;
+  margin-top: 10px;
+}
+
+.config-card h3 {
+  margin: 0 0 15px 0;
+  font-size: 1.1em;
+  color: #495057;
+  border-bottom: 1px solid #dee2e6;
+  padding-bottom: 8px;
+}
+
+.config-card label {
+  display: block;
+  margin-top: 10px;
+  margin-bottom: 5px;
+  font-size: 0.9em;
+  color: #666;
+}
+
+.config-card input[type="text"],
+.config-card input[type="password"],
+.config-card input[type="number"] {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.config-card small {
+  display: block;
+  margin-top: 5px;
+  font-size: 0.85em;
+  color: #6c757d;
+}
+
+.warning-card {
+  background: #fff3cd;
+  border-color: #ffc107;
+}
+
+.warning-card h3 {
+  color: #856404;
+}
+
+.warning-card p {
+  margin: 8px 0;
+  font-size: 0.9em;
+}
+
+.mode-help {
+  display: block;
+  margin-top: 5px;
+  padding: 8px;
+  background: #e7f3ff;
+  border-left: 3px solid #667eea;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
 h2 {
   color: #667eea;
   margin-bottom: 20px;

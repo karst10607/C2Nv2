@@ -58,6 +58,94 @@
           <small>Minimum height for table columns with images (helps alignment)</small>
         </div>
 
+        <div class="form-group">
+          <label for="upload-mode">🖼️ Image Upload Mode</label>
+          <select id="upload-mode">
+            <option value="fileio">🔥 file.io (Auto-delete after use) ⭐ RECOMMENDED</option>
+            <option value="notion_native">📦 Notion Native (file.io bridge, experimental)</option>
+            <option value="tunnel">🌐 Tunnel (Fast but may 404)</option>
+            <option value="s3">☁️ AWS S3 (Permanent storage)</option>
+            <option value="cloudflare">☁️ Cloudflare R2 (Cheaper than S3)</option>
+          </select>
+          <small id="mode-description" class="mode-help">Images upload to file.io and auto-delete after Notion downloads them.</small>
+        </div>
+
+        <!-- file.io config -->
+        <div class="upload-config" id="fileio-config">
+          <div class="config-card">
+            <h3>file.io Settings</h3>
+            <label>API Key (Optional - for paid tier)</label>
+            <input type="password" id="fileio-api-key" placeholder="Leave empty for free tier">
+            <label>Expiry (days)</label>
+            <input type="number" id="fileio-expiry" value="14" min="1" max="365">
+            <small>Files auto-delete after first download OR expiry</small>
+          </div>
+        </div>
+
+        <!-- Tunnel config -->
+        <div class="upload-config" id="tunnel-config" style="display:none;">
+          <div class="config-card">
+            <h3>Tunnel Settings</h3>
+            <label>Keepalive Duration (seconds)</label>
+            <input type="number" id="tunnel-keepalive" value="600" min="60" max="3600">
+            <small>How long to keep tunnel alive after import (600s = 10 min)</small>
+          </div>
+        </div>
+
+        <!-- S3 config -->
+        <div class="upload-config" id="s3-config" style="display:none;">
+          <div class="config-card">
+            <h3>AWS S3 Settings</h3>
+            <label>Bucket Name</label>
+            <input type="text" id="s3-bucket" placeholder="my-notion-images">
+            <label>Region</label>
+            <input type="text" id="s3-region" placeholder="us-west-2">
+            <label>Access Key ID</label>
+            <input type="password" id="s3-access-key">
+            <label>Secret Access Key</label>
+            <input type="password" id="s3-secret-key">
+          </div>
+        </div>
+
+        <!-- Cloudflare config -->
+        <div class="upload-config" id="cloudflare-config" style="display:none;">
+          <div class="config-card">
+            <h3>Cloudflare R2 Settings</h3>
+            <label>Bucket Name</label>
+            <input type="text" id="cf-bucket" placeholder="notion-imports">
+            <label>Account ID</label>
+            <input type="text" id="cf-account-id" placeholder="abc123...">
+            <label>Access Key ID</label>
+            <input type="password" id="cf-access-key">
+            <label>Secret Access Key</label>
+            <input type="password" id="cf-secret-key">
+            <label>Public Domain (R2 custom domain)</label>
+            <input type="text" id="cf-public-domain" placeholder="images.yourdomain.com">
+          </div>
+        </div>
+
+        <!-- Notion Native config -->
+        <div class="upload-config" id="notion-config" style="display:none;">
+          <div class="config-card warning-card">
+            <h3>⚠️ Notion Native Upload (Experimental)</h3>
+            <p>Uses file.io as a bridge - Notion downloads and converts to 'file' type.</p>
+            <p><strong>Pros:</strong> Images hosted by Notion permanently</p>
+            <p><strong>Cons:</strong> Experimental, not officially supported</p>
+            <label>
+              <input type="checkbox" id="notion-accept-risk">
+              I understand this is experimental
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="use-async" checked>
+            ⚡ Use Async Verification (10x faster, recommended for CDN modes)
+          </label>
+          <small>Concurrent API calls for faster verification</small>
+        </div>
+
         <div class="button-group">
           <button id="save-btn" class="btn-primary">Save Configuration</button>
           <button id="dry-run-btn" class="btn-secondary">Dry Run (Preview)</button>
