@@ -12,11 +12,10 @@ from typing import Dict, List, Optional
 import requests
 
 from .constants import (
-    DEFAULT_TUNNEL_KEEPALIVE,
     TUNNEL_KEEPALIVE_PER_FAILED_PAGE,
-    S3_PRESIGNED_URL_EXPIRY,
-    S3_DEFAULT_LIFECYCLE_DAYS
+    S3_PRESIGNED_URL_EXPIRY
 )
+from .models import StrategyConfig, UploadMode
 
 
 class UploadStrategy(ABC):
@@ -86,7 +85,7 @@ class TunnelStrategy(UploadStrategy):
     Cons: Tunnel expires after keepalive, causes 404s if Notion delays
     """
     
-    def __init__(self, keepalive_sec: int = DEFAULT_TUNNEL_KEEPALIVE):
+    def __init__(self, keepalive_sec: int):
         self.keepalive_sec = keepalive_sec
         self.server = None
         self.tunnel = None
@@ -152,7 +151,7 @@ class S3TempStrategy(UploadStrategy):
     """
     
     def __init__(self, bucket: str, region: str, access_key: str, secret_key: str, 
-                 lifecycle_days: int = S3_DEFAULT_LIFECYCLE_DAYS, use_presigned: bool = True):
+                 lifecycle_days: int = 1, use_presigned: bool = True):
         self.bucket = bucket
         self.region = region
         self.access_key = access_key
@@ -431,58 +430,58 @@ class FallbackStrategy(UploadStrategy):
         return self.primary.needs_keepalive()
 
 
-def create_strategy(config) -> UploadStrategy:
+def create_strategy(config: StrategyConfig) -> UploadStrategy:
     """
     Factory function to create upload strategy based on configuration.
     
     Args:
-        config: ImportConfig object with upload_mode and related settings
+        config: StrategyConfig with upload_mode and related settings
     
     Returns:
         Appropriate UploadStrategy instance
     """
-    mode = getattr(config, 'upload_mode', 'tunnel')
+    mode = config.upload_mode
     
-    if mode == 's3_temp' or mode == 's3':
+    if mode == UploadMode.S3_TEMP:
         # S3 with auto-delete (RECOMMENDED)
         return S3TempStrategy(
-            bucket=getattr(config, 's3_bucket', ''),
-            region=getattr(config, 's3_region', 'us-west-2'),
-            access_key=getattr(config, 's3_access_key', ''),
-            secret_key=getattr(config, 's3_secret_key', ''),
-            lifecycle_days=getattr(config, 's3_lifecycle_days', S3_DEFAULT_LIFECYCLE_DAYS),
-            use_presigned=getattr(config, 's3_use_presigned', True)
+            bucket=config.s3.bucket,
+            region=config.s3.region,
+            access_key=config.s3.access_key,
+            secret_key=config.s3.secret_key,
+            lifecycle_days=config.s3.lifecycle_days,
+            use_presigned=config.s3.use_presigned
         )
     
-    elif mode == 's3_permanent':
+    elif mode == UploadMode.S3_PERMANENT:
         # S3 permanent (manual cleanup needed)
         return S3PermanentStrategy(
-            bucket=config.s3_bucket,
-            region=config.s3_region,
-            access_key=config.s3_access_key,
-            secret_key=config.s3_secret_key
+            bucket=config.s3.bucket,
+            region=config.s3.region,
+            access_key=config.s3.access_key,
+            secret_key=config.s3.secret_key
         )
     
-    elif mode == 'cloudflare':
+    elif mode == UploadMode.CLOUDFLARE:
         return CloudflareR2Strategy(
-            bucket=config.cf_bucket,
-            account_id=config.cf_account_id,
-            access_key=config.cf_access_key,
-            secret_key=config.cf_secret_key,
-            public_domain=config.cf_public_domain
+            bucket=config.cloudflare.bucket,
+            account_id=config.cloudflare.account_id,
+            access_key=config.cloudflare.access_key,
+            secret_key=config.cloudflare.secret_key,
+            public_domain=config.cloudflare.public_domain
         )
     
-    elif mode == 'notion_native':
+    elif mode == UploadMode.NOTION_NATIVE:
         # Notion Native via S3 temp bridge
         return NotionNativeStrategy(
-            s3_bucket=getattr(config, 's3_bucket', ''),
-            s3_region=getattr(config, 's3_region', 'us-west-2'),
-            s3_access_key=getattr(config, 's3_access_key', ''),
-            s3_secret_key=getattr(config, 's3_secret_key', '')
+            s3_bucket=config.s3.bucket,
+            s3_region=config.s3.region,
+            s3_access_key=config.s3.access_key,
+            s3_secret_key=config.s3.secret_key
         )
     
-    else:  # 'tunnel' (default)
+    else:  # UploadMode.TUNNEL (default)
         return TunnelStrategy(
-            keepalive_sec=getattr(config, 'tunnel_keepalive_sec', DEFAULT_TUNNEL_KEEPALIVE)
+            keepalive_sec=config.tunnel.keepalive_sec
         )
 

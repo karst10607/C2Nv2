@@ -2,6 +2,61 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.4] - 2025-10-22
+
+### 🏗️ Major Refactoring - Configuration & Error Handling
+
+This release includes Phase 1 and Phase 2 of the v3 refactoring plan, plus additional improvements.
+
+#### **Phase 1: Extract Constants** ✅
+- Created `src/constants.py` with all magic numbers centralized
+- Replaced 50+ hardcoded values throughout codebase
+- Better maintainability and tuning
+
+#### **Phase 2: Configuration Model** ✅
+- Created type-safe configuration models in `src/models/`:
+  - `BaseConfig`, `StrategyConfig`, `S3Config`, `CloudflareConfig`, `TunnelConfig`
+  - `ImportConfig` as main configuration container
+  - `UploadMode` enum for type-safe upload modes
+- Removed inline `StrategyConfig` class from importer.py
+- Eliminated all `getattr()` calls in upload strategies
+- Added comprehensive validation with helpful error messages
+
+#### **Bonus: Central Error Handling** 🎁
+- Created `src/models/errors.py` with structured error codes:
+  - E1xxx: Configuration errors
+  - E2xxx: Upload errors  
+  - E3xxx: Tunnel errors
+  - E4xxx: Notion API errors
+  - E5xxx: Verification errors
+  - E6xxx: Import process errors
+- Custom exception hierarchy for better error handling
+- Consistent error messages with context
+
+#### **Bonus: Logger Module** 🎁
+- Created `src/models/logger.py` for consistent output formatting
+- Ready for integration in future phases
+- Standardized color-coded messages
+
+#### **Removed Dependencies** 🧹
+- Removed unused `python-dotenv` and `pyyaml` from requirements
+- Moved test dependencies to `requirements-dev.txt`
+- Removed legacy Tkinter GUI (`src/gui_config.py`, `launch_gui.py`)
+
+#### **Code Quality**
+- No more magic numbers in code
+- Type-safe configuration access
+- Better IDE support with autocomplete
+- Cleaner, more maintainable codebase
+
+## [3.1.3] - 2025-10-22
+
+### 🔧 Phase 1 Refactoring - Constants Extraction
+
+- Extracted all magic numbers to `src/constants.py`
+- Fixed additional constants missed in first pass
+- Prepared codebase for further refactoring
+
 ## [3.1.2] - 2025-10-22
 
 ### 🧹 Code Cleanup - Wired Strategies & Removed Dead Code

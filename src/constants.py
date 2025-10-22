@@ -52,8 +52,5 @@ DNS_RESOLVE_INTERVAL = 1  # Interval between DNS resolution attempts (seconds)
 HTTP_CHECK_TIMEOUT = 3  # Timeout for HTTP accessibility check (seconds)
 HTTP_CHECK_INTERVAL = 1  # Interval between HTTP checks (seconds)
 
-# GUI Configuration
-GUI_ENTRY_WIDTH = 60  # Width of entry fields in GUI
-
 # Time Formatting
 SECONDS_PER_MINUTE = 60  # Seconds in a minute for time display
