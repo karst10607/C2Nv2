@@ -5,9 +5,8 @@
 - Tables with images converted to Notion column_list/column; wrap rows >6 cells
 - Use HTML <title> as Notion page title
 
-## GUI Options
+## GUI
 
-### Option 1: Electron GUI (Recommended)
 Modern desktop app with live logs and better UX.
 
 ```bash
@@ -16,15 +15,6 @@ npm start
 ```
 
 See [README_ELECTRON.md](README_ELECTRON.md) for details.
-
-### Option 2: Tkinter GUI (Lightweight)
-Simple Python GUI, no Node.js required.
-
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m src.gui_config  # or: ./launch_gui.py
-```
 
 ## CLI Usage
 

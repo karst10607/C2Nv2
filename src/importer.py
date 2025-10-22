@@ -12,10 +12,8 @@ from .notion_api import Notion
 from .database import ImportDatabase
 from .verification import ImageVerifier
 from .upload_strategies import create_strategy
+from .models import ImportConfig, ConfigurationError, UploadError, ErrorCode
 from .constants import (
-    DEFAULT_TUNNEL_KEEPALIVE,
-    MAX_COLUMNS_PER_ROW,
-    MIN_COLUMN_HEIGHT,
     SECONDS_PER_PAGE_ESTIMATE,
     SECONDS_PER_IMAGE_ESTIMATE,
     INITIAL_IMAGE_WAIT,
@@ -23,7 +21,6 @@ from .constants import (
     MAX_IMAGE_TIMEOUT,
     IMAGE_TIMEOUT_BASE,
     IMAGE_TIMEOUT_PER_IMAGE,
-    TUNNEL_KEEPALIVE_PER_FAILED_PAGE,
     MAX_FAILED_PAGES_DISPLAY,
     SECONDS_PER_MINUTE
 )
@@ -93,38 +90,36 @@ def main(argv: Optional[list] = None):
     ap.add_argument('--source-dir', default=None)
     ap.add_argument('--run', action='store_true', help='Perform writes to Notion')
     ap.add_argument('--dry-run', action='store_true', help='Parse and plan only')
-    ap.add_argument('--max-columns', type=int, default=MAX_COLUMNS_PER_ROW)
+    ap.add_argument('--max-columns', type=int, default=None)
     ap.add_argument('--parent-id', default=None)
     args = ap.parse_args(argv)
 
-    cfg = AppConfig.load()
-    source_dir = args.source_dir or cfg.source_dir
+    # Load configuration
+    app_cfg = AppConfig.load()
+    source_dir = args.source_dir or app_cfg.source_dir
     if not source_dir:
         print('[red]Source directory not set. Use GUI or --source-dir.[/red]')
         return 2
     
-    # Create upload strategy based on config
-    # Create a minimal config object for strategy
-    class StrategyConfig:
-        pass
+    # Convert to new config model
+    import_config = app_cfg.to_import_config()
+    import_config.base.source_dir = source_dir  # Override with CLI arg if provided
     
-    strategy_config = StrategyConfig()
-    strategy_config.upload_mode = getattr(cfg, 'upload_mode', 'tunnel')
-    strategy_config.s3_bucket = getattr(cfg, 's3_bucket', '')
-    strategy_config.s3_region = getattr(cfg, 's3_region', 'us-west-2')
-    strategy_config.s3_access_key = getattr(cfg, 's3_access_key', '')
-    strategy_config.s3_secret_key = getattr(cfg, 's3_secret_key', '')
-    strategy_config.s3_lifecycle_days = getattr(cfg, 's3_lifecycle_days', 1)
-    strategy_config.s3_use_presigned = getattr(cfg, 's3_use_presigned', True)
-    strategy_config.cf_bucket = getattr(cfg, 'cf_bucket', '')
-    strategy_config.cf_account_id = getattr(cfg, 'cf_account_id', '')
-    strategy_config.cf_access_key = getattr(cfg, 'cf_access_key', '')
-    strategy_config.cf_secret_key = getattr(cfg, 'cf_secret_key', '')
-    strategy_config.cf_public_domain = getattr(cfg, 'cf_public_domain', '')
-    strategy_config.tunnel_keepalive_sec = getattr(cfg, 'tunnel_keepalive_sec', DEFAULT_TUNNEL_KEEPALIVE)
+    # Override with CLI arguments
+    if args.parent_id:
+        import_config.base.parent_id = args.parent_id
+    if args.max_columns:
+        import_config.base.max_columns = args.max_columns
+    
+    # Validate configuration (don't require Notion creds for dry-run)
+    try:
+        import_config.validate(require_notion=args.run)
+    except ConfigurationError as e:
+        print(f'[red]{e}[/red]')
+        return 2
     
     # Initialize upload strategy
-    upload_strategy = create_strategy(strategy_config)
+    upload_strategy = create_strategy(import_config.strategy)
     public = upload_strategy.prepare(Path(source_dir))
     
     print(f"[green]Upload strategy:[/green] {upload_strategy.get_name()}")
@@ -132,8 +127,8 @@ def main(argv: Optional[list] = None):
         print(f"[green]Base URL:[/green] {public}")
 
     # Notion
-    token = cfg.notion_token
-    parent_id = args.parent_id or cfg.parent_id
+    token = import_config.base.notion_token
+    parent_id = import_config.base.parent_id
     if args.run:
         if not token:
             print('[red]NOTION_TOKEN missing. Set via GUI or env.[/red]')
@@ -178,9 +173,9 @@ def main(argv: Optional[list] = None):
         blocks = to_notion_blocks(
             ast, 
             image_base_url=image_base_url, 
-            max_cols=args.max_columns,
-            preserve_table_layout=True,
-            min_column_height=MIN_COLUMN_HEIGHT
+            max_cols=import_config.base.max_columns,
+            preserve_table_layout=import_config.base.preserve_table_layout,
+            min_column_height=import_config.base.min_column_height
         )
         
         # For S3/CDN strategies, upload images and update URLs in blocks

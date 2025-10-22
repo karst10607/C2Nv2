@@ -44,7 +44,6 @@ src/
 │   
 └── Infrastructure
     ├── image_server.py       # Flask server + tunnel management
-    └── gui_config.py         # Tkinter GUI (legacy)
 ```
 
 ---
