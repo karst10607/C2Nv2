@@ -61,25 +61,13 @@
         <div class="form-group">
           <label for="upload-mode">🖼️ Image Upload Mode</label>
           <select id="upload-mode">
-            <option value="fileio">🔥 file.io (Auto-delete after use) ⭐ RECOMMENDED</option>
-            <option value="notion_native">📦 Notion Native (file.io bridge, experimental)</option>
+            <option value="s3">☁️ S3 Auto-Delete (Auto-cleanup after 1 day) ⭐ RECOMMENDED</option>
+            <option value="notion_native">📦 Notion Native (S3 bridge, experimental)</option>
             <option value="tunnel">🌐 Tunnel (Fast but may 404)</option>
-            <option value="s3">☁️ AWS S3 (Permanent storage)</option>
-            <option value="cloudflare">☁️ Cloudflare R2 (Cheaper than S3)</option>
+            <option value="cloudflare">☁️ Cloudflare R2 (Auto-delete, cheaper)</option>
+            <option value="s3_permanent">☁️ S3 Permanent (Manual cleanup)</option>
           </select>
-          <small id="mode-description" class="mode-help">Images upload to file.io and auto-delete after Notion downloads them.</small>
-        </div>
-
-        <!-- file.io config -->
-        <div class="upload-config" id="fileio-config">
-          <div class="config-card">
-            <h3>file.io Settings</h3>
-            <label>API Key (Optional - for paid tier)</label>
-            <input type="password" id="fileio-api-key" placeholder="Leave empty for free tier">
-            <label>Expiry (days)</label>
-            <input type="number" id="fileio-expiry" value="14" min="1" max="365">
-            <small>Files auto-delete after first download OR expiry</small>
-          </div>
+          <small id="mode-description" class="mode-help">Upload to S3 with lifecycle auto-delete after 1 day. Reliable and cheap (~$0.001).</small>
         </div>
 
         <!-- Tunnel config -->
@@ -93,17 +81,24 @@
         </div>
 
         <!-- S3 config -->
-        <div class="upload-config" id="s3-config" style="display:none;">
+        <div class="upload-config" id="s3-config">
           <div class="config-card">
-            <h3>AWS S3 Settings</h3>
+            <h3>AWS S3 Settings (Auto-Delete)</h3>
             <label>Bucket Name</label>
-            <input type="text" id="s3-bucket" placeholder="my-notion-images">
+            <input type="text" id="s3-bucket" placeholder="notion-temp-images">
             <label>Region</label>
-            <input type="text" id="s3-region" placeholder="us-west-2">
+            <input type="text" id="s3-region" value="us-west-2">
             <label>Access Key ID</label>
             <input type="password" id="s3-access-key">
             <label>Secret Access Key</label>
             <input type="password" id="s3-secret-key">
+            <label>
+              <input type="checkbox" id="s3-use-presigned" checked>
+              Use pre-signed URLs (expires in 1 hour, more secure)
+            </label>
+            <label>Auto-delete after (days)</label>
+            <input type="number" id="s3-lifecycle-days" value="1" min="1" max="30">
+            <small>⚠️ Must configure lifecycle rule in S3 console for auto-delete</small>
           </div>
         </div>
 
@@ -128,12 +123,13 @@
         <div class="upload-config" id="notion-config" style="display:none;">
           <div class="config-card warning-card">
             <h3>⚠️ Notion Native Upload (Experimental)</h3>
-            <p>Uses file.io as a bridge - Notion downloads and converts to 'file' type.</p>
-            <p><strong>Pros:</strong> Images hosted by Notion permanently</p>
-            <p><strong>Cons:</strong> Experimental, not officially supported</p>
+            <p><strong>How it works:</strong> Uses S3 temp storage as a bridge → Notion downloads and (hopefully) converts to 'file' type → S3 auto-deletes after 1 day</p>
+            <p><strong>Pros:</strong> Images become Notion-hosted permanently (file type, not external)</p>
+            <p><strong>Cons:</strong> Experimental, requires AWS S3 account (same as S3 Auto-Delete mode)</p>
+            <p><strong>⚠️ Note:</strong> Uses the SAME S3 credentials as "S3 Auto-Delete" mode. Configure S3 settings above first!</p>
             <label>
               <input type="checkbox" id="notion-accept-risk">
-              I understand this is experimental
+              I understand this is experimental and requires S3 account
             </label>
           </div>
         </div>

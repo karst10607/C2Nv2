@@ -2,6 +2,60 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.1.1] - 2025-10-21
+
+### 🔄 Replaced file.io with S3 Auto-Delete (More Reliable)
+
+#### **Changed**
+- **Replaced file.io** with **S3 Temp Storage** as default/recommended mode
+  - file.io API appears unreliable (empty responses, redirects)
+  - S3 with lifecycle rules is more dependable
+  - Still auto-deletes (lifecycle rule: delete after 1 day)
+  - Tiny cost (~$0.001 vs file.io's uncertain availability)
+
+#### **New Default: S3 Auto-Delete** ⭐
+```
+Mode: S3 Auto-Delete
+How it works:
+1. Upload to S3 prefix: notion-temp/
+2. Use pre-signed URLs (expire in 1 hour)
+3. Notion downloads (within minutes)
+4. S3 lifecycle auto-deletes after 1 day
+5. Your storage: 0 bytes (auto-cleaned!)
+
+Cost: ~$0.001 for temp storage
+Reliability: 99.99% (vs file.io's questionable API)
+```
+
+#### **Notion Native Mode Updated**
+- Now uses **S3 temp bridge** instead of file.io
+- More reliable than file.io bridge
+- Still experimental (relies on Notion converting to 'file' type)
+- Auto-deletes via S3 lifecycle
+
+#### **GUI Changes**
+- Removed file.io mode (unreliable)
+- S3 Auto-Delete is now default/recommended
+- S3 config shows lifecycle days setting
+- Added "Use pre-signed URLs" checkbox
+- Updated mode descriptions
+
+#### **Fixed**
+- **Progress bar jumping to 100%** after import finishes
+  - Was forcing `processedFiles = totalFiles` on success
+  - Now tracks actual file processing from log output
+  - Shows accurate progress during verification
+  - Only reaches 100% when all files actually processed
+
+#### **Modes Available**
+1. ☁️ S3 Auto-Delete (recommended) - Auto-cleanup via lifecycle
+2. 📦 Notion Native (experimental) - S3 bridge, converts to 'file' type  
+3. 🌐 Tunnel (quick tests) - May 404
+4. ☁️ Cloudflare R2 (cheaper) - Auto-delete capable
+5. ☁️ S3 Permanent (enterprise) - Manual cleanup
+
+---
+
 ## [3.1.0] - 2025-10-21
 
 ### 🎨 Multiple Upload Strategies (Fixes 404 Problem!)
