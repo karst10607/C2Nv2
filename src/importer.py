@@ -6,12 +6,12 @@ from typing import Optional, List, Dict, Any
 from rich import print
 
 from .config import AppConfig
-from .image_server import StaticServer, Tunnel
 from .html_parser import parse_html_file
 from .transform import to_notion_blocks
 from .notion_api import Notion
 from .database import ImportDatabase
 from .verification import ImageVerifier
+from .upload_strategies import create_strategy
 
 
 def count_images_in_blocks(blocks: List[Dict[str, Any]]) -> int:
@@ -26,6 +26,48 @@ def count_images_in_blocks(blocks: List[Dict[str, Any]]) -> int:
                     if child.get('type') == 'image':
                         count += 1
     return count
+
+
+def upload_images_in_blocks(blocks: List[Dict[str, Any]], strategy, source_dir: Path, context: Dict) -> List[Dict[str, Any]]:
+    """
+    Upload images using strategy and update URLs in blocks.
+    For S3/CDN strategies only (tunnel doesn't need this).
+    """
+    context['source_dir'] = source_dir
+    
+    for block in blocks:
+        if block.get('type') == 'image':
+            # Get current URL (relative path)
+            current_url = block['image']['external']['url']
+            
+            # If it's a local path, upload it
+            if not current_url.startswith(('http://', 'https://')):
+                local_path = source_dir / current_url
+                if local_path.exists():
+                    try:
+                        # Upload and get CDN URL
+                        cdn_url = strategy.upload_image(local_path, context)
+                        # Update block with CDN URL
+                        block['image']['external']['url'] = cdn_url
+                    except Exception as e:
+                        print(f"  [yellow]Warning: Failed to upload {local_path.name}: {e}[/yellow]")
+        
+        elif block.get('type') == 'column_list':
+            # Handle images in column_list
+            for col in block.get('column_list', {}).get('children', []):
+                for child in col.get('column', {}).get('children', []):
+                    if child.get('type') == 'image':
+                        current_url = child['image']['external']['url']
+                        if not current_url.startswith(('http://', 'https://')):
+                            local_path = source_dir / current_url
+                            if local_path.exists():
+                                try:
+                                    cdn_url = strategy.upload_image(local_path, context)
+                                    child['image']['external']['url'] = cdn_url
+                                except Exception as e:
+                                    print(f"  [yellow]Warning: Failed to upload {local_path.name}: {e}[/yellow]")
+    
+    return blocks
 
 
 # Removed: verify_images_loaded() - now in verification.py as ImageVerifier.verify_page_images()
@@ -45,13 +87,34 @@ def main(argv: Optional[list] = None):
     if not source_dir:
         print('[red]Source directory not set. Use GUI or --source-dir.[/red]')
         return 2
-
-    # Start local static server and tunnel
-    srv = StaticServer(Path(source_dir))
-    srv.start()
-    tunnel = Tunnel(srv.base_url())
-    public = tunnel.start()
-    print(f"[green]Serving images at:[/green] {public}")
+    
+    # Create upload strategy based on config
+    # Create a minimal config object for strategy
+    class StrategyConfig:
+        pass
+    
+    strategy_config = StrategyConfig()
+    strategy_config.upload_mode = getattr(cfg, 'upload_mode', 'tunnel')
+    strategy_config.s3_bucket = getattr(cfg, 's3_bucket', '')
+    strategy_config.s3_region = getattr(cfg, 's3_region', 'us-west-2')
+    strategy_config.s3_access_key = getattr(cfg, 's3_access_key', '')
+    strategy_config.s3_secret_key = getattr(cfg, 's3_secret_key', '')
+    strategy_config.s3_lifecycle_days = getattr(cfg, 's3_lifecycle_days', 1)
+    strategy_config.s3_use_presigned = getattr(cfg, 's3_use_presigned', True)
+    strategy_config.cf_bucket = getattr(cfg, 'cf_bucket', '')
+    strategy_config.cf_account_id = getattr(cfg, 'cf_account_id', '')
+    strategy_config.cf_access_key = getattr(cfg, 'cf_access_key', '')
+    strategy_config.cf_secret_key = getattr(cfg, 'cf_secret_key', '')
+    strategy_config.cf_public_domain = getattr(cfg, 'cf_public_domain', '')
+    strategy_config.tunnel_keepalive_sec = getattr(cfg, 'tunnel_keepalive_sec', 600)
+    
+    # Initialize upload strategy
+    upload_strategy = create_strategy(strategy_config)
+    public = upload_strategy.prepare(Path(source_dir))
+    
+    print(f"[green]Upload strategy:[/green] {upload_strategy.get_name()}")
+    if public:
+        print(f"[green]Base URL:[/green] {public}")
 
     # Notion
     token = cfg.notion_token
@@ -87,13 +150,28 @@ def main(argv: Optional[list] = None):
     
     for f in html_files:
         ast = parse_html_file(f)
+        
+        # For S3/CDN strategies, upload images now and get URLs
+        # For tunnel, public URL is already set
+        if public:
+            # Tunnel strategy - use base URL
+            image_base_url = public
+        else:
+            # S3/CDN strategy - will upload per-image
+            image_base_url = ""  # Will be replaced during transform
+        
         blocks = to_notion_blocks(
             ast, 
-            image_base_url=public, 
+            image_base_url=image_base_url, 
             max_cols=args.max_columns,
             preserve_table_layout=True,
             min_column_height=3
         )
+        
+        # For S3/CDN strategies, upload images and update URLs in blocks
+        if not public:
+            blocks = upload_images_in_blocks(blocks, upload_strategy, Path(source_dir), {})
+        
         image_count = count_images_in_blocks(blocks)
         total_blocks += len(blocks)
         total_images += image_count
@@ -204,19 +282,10 @@ def main(argv: Optional[list] = None):
         if len(failed_pages) > 10:
             print(f"[yellow]  ... and {len(failed_pages) - 10} more[/yellow]")
     
-    # Keep tunnel alive after all imports
-    # Even with verification, Notion may queue some images for later fetching
+    # Cleanup upload strategy (keepalive if needed, or just cleanup)
     if not args.dry_run:
-        import os
-        # Default 180s (3 min) to ensure Notion backend has time to fetch queued images
-        keep_alive = int(os.environ.get('IMAGE_TUNNEL_KEEPALIVE_SEC', '180'))
-        if failed_pages:
-            print(f"\n[yellow]Keeping tunnel alive for {keep_alive}s for failed images...[/yellow]")
-        else:
-            print(f"\n[green]Keeping tunnel alive for {keep_alive}s as safety buffer...[/green]")
-        time.sleep(keep_alive)
+        upload_strategy.cleanup(failed_count=len(failed_pages))
     
-    tunnel.stop()
     db.close()
     
     # Final summary

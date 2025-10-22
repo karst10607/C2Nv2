@@ -22,6 +22,11 @@ class AppConfig:
                 cfg.notion_token = data.get("NOTION_TOKEN") or data.get("notion_token")
                 cfg.parent_id = data.get("PARENT_ID") or data.get("parent_id")
                 cfg.source_dir = data.get("SOURCE_DIR") or cfg.source_dir
+                
+                # Load all config fields dynamically (for upload strategies, etc.)
+                for key, value in data.items():
+                    if not hasattr(cfg, key.lower()):
+                        setattr(cfg, key.lower(), value)
             except Exception:
                 pass
         # .env environment
