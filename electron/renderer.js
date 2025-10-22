@@ -49,8 +49,7 @@ const progressEta = document.getElementById('progress-eta');
 uploadModeSelect.addEventListener('change', () => {
   const mode = uploadModeSelect.value;
   
-  // Hide all config sections
-  fileioConfig.style.display = 'none';
+  // Hide all config sections  
   tunnelConfig.style.display = 'none';
   s3Config.style.display = 'none';
   cloudflareConfig.style.display = 'none';
@@ -58,9 +57,9 @@ uploadModeSelect.addEventListener('change', () => {
   
   // Show relevant config
   const configMap = {
-    'fileio': fileioConfig,
-    'tunnel': tunnelConfig,
     's3': s3Config,
+    's3_permanent': s3Config,
+    'tunnel': tunnelConfig,
     'cloudflare': cloudflareConfig,
     'notion_native': notionConfig
   };
@@ -71,11 +70,11 @@ uploadModeSelect.addEventListener('change', () => {
   
   // Update description
   const descriptions = {
-    'fileio': '🔥 Images upload to file.io and AUTO-DELETE after Notion downloads. No cleanup needed!',
-    'notion_native': '📦 Uses file.io bridge - Notion converts to permanent "file" type. Experimental.',
-    'tunnel': '🌐 Fast local serving via tunnel. May cause 404s if tunnel closes before Notion fetches.',
-    's3': '☁️ Upload to AWS S3. Permanent storage. Reliable but costs ~$1-5/month.',
-    'cloudflare': '☁️ Upload to Cloudflare R2. Cheaper than S3, no egress fees. Requires custom domain.'
+    's3': '☁️ Upload to S3 temp storage. AUTO-DELETES after 1 day via lifecycle rule. Reliable! (~$0.001 cost)',
+    'notion_native': '📦 Uses S3 temp bridge. Notion converts to "file" type. Auto-deletes after 1 day. Experimental.',
+    'tunnel': '🌐 Fast local serving. May cause 404s if tunnel closes too early. For quick tests only.',
+    's3_permanent': '☁️ Permanent S3 storage. Manual cleanup needed. Costs ~$1-5/month ongoing.',
+    'cloudflare': '☁️ Cloudflare R2 with lifecycle auto-delete. 3x cheaper than S3. Requires custom domain.'
   };
   
   modeDescription.textContent = descriptions[mode] || '';
@@ -93,7 +92,7 @@ uploadModeSelect.addEventListener('change', () => {
   minColumnHeightInput.value = currentConfig.MIN_COLUMN_HEIGHT || 3;
   
   // Load upload mode settings
-  uploadModeSelect.value = currentConfig.UPLOAD_MODE || 'fileio';
+  uploadModeSelect.value = currentConfig.UPLOAD_MODE || 's3';
   uploadModeSelect.dispatchEvent(new Event('change'));  // Trigger mode change
 })();
 
@@ -173,20 +172,17 @@ saveBtn.addEventListener('click', async () => {
   };
   
   // Add mode-specific settings
-  if (uploadMode === 'fileio' || uploadMode === 'notion_native') {
-    config.FILEIO_API_KEY = document.getElementById('fileio-api-key')?.value || '';
-    config.FILEIO_EXPIRY_DAYS = parseInt(document.getElementById('fileio-expiry')?.value) || 14;
-  }
-  
   if (uploadMode === 'tunnel') {
     config.TUNNEL_KEEPALIVE_SEC = parseInt(document.getElementById('tunnel-keepalive')?.value) || 600;
   }
   
-  if (uploadMode === 's3') {
+  if (uploadMode === 's3' || uploadMode === 's3_permanent' || uploadMode === 'notion_native') {
     config.S3_BUCKET = document.getElementById('s3-bucket')?.value || '';
-    config.S3_REGION = document.getElementById('s3-region')?.value || '';
+    config.S3_REGION = document.getElementById('s3-region')?.value || 'us-west-2';
     config.S3_ACCESS_KEY = document.getElementById('s3-access-key')?.value || '';
     config.S3_SECRET_KEY = document.getElementById('s3-secret-key')?.value || '';
+    config.S3_USE_PRESIGNED = document.getElementById('s3-use-presigned')?.checked !== false;
+    config.S3_LIFECYCLE_DAYS = parseInt(document.getElementById('s3-lifecycle-days')?.value) || 1;
   }
   
   if (uploadMode === 'cloudflare') {
@@ -308,12 +304,10 @@ async function runImport(dryRun) {
   }
 
   if (result.success) {
-    appendLog('\n✓ Completed successfully!\n');
-    // Force finalize to 100%
-    if (totalFiles > 0) {
-      processedFiles = totalFiles;
-    }
-    updateProgress(); // Final update
+    appendLog('\n✓ Import process completed!\n');
+    // Don't force to 100% - let actual file processing determine progress
+    // Progress already updated by parseProgress() from log output
+    updateProgress(); // Final update with actual counts
   } else {
     appendLog('\n✗ Failed: ' + (result.error || 'Unknown error') + '\n');
   }

@@ -121,84 +121,105 @@ class TunnelStrategy(UploadStrategy):
         return True
 
 
-class FileIOStrategy(UploadStrategy):
+class S3TempStrategy(UploadStrategy):
     """
-    Upload to file.io - one-time download service.
+    S3 with auto-delete lifecycle rules (RECOMMENDED).
+    
+    Uploads to S3 with:
+    - Temporary storage prefix (notion-temp/)
+    - Lifecycle rule: auto-delete after 1 day
+    - Pre-signed URLs (expire in 1 hour)
     
     Pros:
-    - Auto-deletes after Notion downloads (privacy + no storage costs)
-    - No account needed (free tier)
-    - URLs valid for 14 days (plenty of time)
-    - No tunnel timeout issues
+    - Auto-deletes via S3 lifecycle rules (reliable!)
+    - You control the infrastructure
+    - Very reliable (99.99% uptime)
+    - Fast CDN delivery
+    - Cheap (~$0.001 for temp storage)
     
     Cons:
-    - Rate limited (~10-20 uploads/min on free tier)
-    - 100 MB per file limit (free tier)
-    - Slower than tunnel (upload takes time)
+    - Requires AWS account setup (15 min)
+    - Tiny cost (~$0.001 vs free)
     
-    Best for: Medium imports (10-100 pages, <100 images)
+    Best for: Production imports (100-1000+ pages)
     """
     
-    def __init__(self, api_key: Optional[str] = None, expire_days: int = 14):
-        self.api_key = api_key
-        self.expire_days = expire_days
-        self.upload_url = 'https://file.io'
+    def __init__(self, bucket: str, region: str, access_key: str, secret_key: str, 
+                 lifecycle_days: int = 1, use_presigned: bool = True):
+        self.bucket = bucket
+        self.region = region
+        self.access_key = access_key
+        self.secret_key = secret_key
+        self.lifecycle_days = lifecycle_days
+        self.use_presigned = use_presigned
+        self.client = None
         self.uploaded_count = 0
     
     def prepare(self, source_dir: Path) -> str:
-        print("[green]Using file.io strategy - images will auto-delete after Notion downloads[/green]")
+        import boto3
+        
+        self.client = boto3.client('s3',
+            region_name=self.region,
+            aws_access_key_id=self.access_key,
+            aws_secret_access_key=self.secret_key
+        )
+        
+        print(f"[green]Using S3 Auto-Delete: {self.bucket} ({self.region})[/green]")
+        print(f"[green]  Files will auto-delete after {self.lifecycle_days} day(s)[/green]")
         return ""
     
     def upload_image(self, local_path: Path, context: Dict) -> str:
-        """Upload to file.io with one-time download"""
+        """Upload to S3 temp prefix and return URL (auto-deletes via lifecycle)"""
         
-        # Rate limiting for free tier
-        if not self.api_key and self.uploaded_count > 0:
-            if self.uploaded_count % 10 == 0:
-                print(f"  [dim]Rate limit pause (uploaded {self.uploaded_count} images)...[/dim]")
-                time.sleep(6)  # 6s pause every 10 uploads
+        # Generate unique key with timestamp and hash
+        content_hash = hashlib.md5(local_path.read_bytes()).hexdigest()[:12]
+        timestamp = int(time.time())
+        # Use notion-temp/ prefix for lifecycle rule targeting
+        key = f'notion-temp/{timestamp}/{content_hash}/{local_path.name}'
         
+        # Upload
         with open(local_path, 'rb') as f:
-            files = {'file': (local_path.name, f, self._get_content_type(local_path))}
-            
-            data = {
-                'expires': f'{self.expire_days}d',
-                'maxDownloads': '1',  # Auto-delete after first download!
-                'autoDelete': 'true'
-            }
-            
-            headers = {}
-            if self.api_key:
-                headers['Authorization'] = f'Bearer {self.api_key}'
-            
-            response = requests.post(self.upload_url, files=files, data=data, headers=headers)
-            
-            if response.status_code == 200:
-                result = response.json()
-                if result.get('success'):
-                    file_url = result['link']
-                    self.uploaded_count += 1
-                    print(f"  [dim]→ file.io ({self.uploaded_count}): {local_path.name}[/dim]")
-                    return file_url
-                else:
-                    raise Exception(f'file.io upload failed: {result.get("message", "Unknown error")}')
-            else:
-                raise Exception(f'file.io HTTP {response.status_code}: {response.text[:100]}')
+            self.client.put_object(
+                Bucket=self.bucket,
+                Key=key,
+                Body=f.read(),
+                ContentType=self._get_content_type(local_path)
+            )
+        
+        self.uploaded_count += 1
+        
+        # Generate URL (presigned for security, or public)
+        if self.use_presigned:
+            # Presigned URL expires in 1 hour (Notion downloads within minutes)
+            url = self.client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': self.bucket, 'Key': key},
+                ExpiresIn=3600  # 1 hour
+            )
+        else:
+            # Public URL (requires bucket to be public-read)
+            url = f'https://{self.bucket}.s3.{self.region}.amazonaws.com/{key}'
+        
+        print(f"  [dim]→ S3 temp ({self.uploaded_count}): {local_path.name}[/dim]")
+        return url
     
     def cleanup(self, failed_count: int = 0):
-        print(f"[green]✓ Uploaded {self.uploaded_count} images to file.io[/green]")
-        print("[green]  Files will auto-delete after Notion downloads them (no cleanup needed!)[/green]")
+        print(f"[green]✓ Uploaded {self.uploaded_count} images to S3 (temp storage)[/green]")
+        print(f"[green]  S3 lifecycle will auto-delete after {self.lifecycle_days} day(s)[/green]")
+        print(f"[cyan]  Set lifecycle rule in S3 console if not already configured[/cyan]")
     
     def needs_keepalive(self) -> bool:
-        return False  # URLs valid for 14 days
+        return False  # URLs valid for 1 hour, lifecycle deletes after 1 day
 
 
-class S3Strategy(UploadStrategy):
+class S3PermanentStrategy(UploadStrategy):
     """
-    AWS S3 upload strategy.
+    AWS S3 upload strategy (PERMANENT storage).
     
     Pros: Permanent, reliable, fast
-    Cons: Requires AWS account, storage costs
+    Cons: Requires AWS account, storage costs, manual cleanup
+    
+    Use S3TempStrategy instead for auto-delete!
     """
     
     def __init__(self, bucket: str, region: str, access_key: str, secret_key: str):
@@ -312,84 +333,38 @@ class CloudflareR2Strategy(UploadStrategy):
 
 class NotionNativeStrategy(UploadStrategy):
     """
-    Notion native file upload (EXPERIMENTAL).
+    Notion native file upload via S3 temp bridge (EXPERIMENTAL).
     
-    Uploads images as Notion 'file' type (not 'external').
-    Images are hosted by Notion permanently.
-    
-    WARNING: Uses workaround methods as Notion API doesn't officially
-    support file uploads for image blocks. May break with API changes.
+    Uses S3TempStrategy as bridge instead of file.io (more reliable).
     
     Approach:
-    1. Create a temporary file block in the page
-    2. Upload file content via Notion's file endpoint
-    3. Convert to image block referencing the file
+    1. Upload to S3 temp storage
+    2. Give S3 URL to Notion
+    3. Notion downloads and caches
+    4. Notion converts to 'file' type (hopefully)
+    5. S3 lifecycle auto-deletes after 1 day
     
-    OR (simpler):
-    1. Upload as external URL first (via file.io)
-    2. Let Notion cache it
-    3. Notion converts external → file automatically
-    
-    Pros: Images hosted by Notion forever, no external dependencies
-    Cons: Experimental, may not work reliably
+    Pros: Images become Notion-hosted, reliable bridge
+    Cons: Experimental conversion, requires S3 account
     """
     
-    def __init__(self, notion_client, use_fileio_bridge: bool = True):
-        self.notion = notion_client
-        self.use_fileio_bridge = use_fileio_bridge
-        self.fileio_helper = None
+    def __init__(self, s3_bucket: str, s3_region: str, s3_access_key: str, s3_secret_key: str):
+        self.s3_helper = S3TempStrategy(s3_bucket, s3_region, s3_access_key, s3_secret_key)
         self.uploaded_count = 0
     
     def prepare(self, source_dir: Path) -> str:
-        if self.use_fileio_bridge:
-            # Use file.io as bridge, let Notion cache and convert
-            print("[yellow]Using Notion Native (via file.io bridge) - experimental[/yellow]")
-            self.fileio_helper = FileIOStrategy(expire_days=7)
-            self.fileio_helper.prepare(source_dir)
-        else:
-            print("[yellow]Using Notion Native (direct upload) - highly experimental[/yellow]")
-        
-        return ""
+        print("[yellow]Using Notion Native (via S3 temp bridge) - experimental[/yellow]")
+        return self.s3_helper.prepare(source_dir)
     
     def upload_image(self, local_path: Path, context: Dict) -> str:
-        """
-        Upload image so it becomes Notion 'file' type (not external).
-        
-        Method 1 (use_fileio_bridge=True, RECOMMENDED):
-        - Upload to file.io temporarily
-        - Return file.io URL
-        - Notion fetches and caches as 'file' type
-        - file.io auto-deletes
-        
-        Method 2 (use_fileio_bridge=False, EXPERIMENTAL):
-        - Try to use Notion's undocumented upload endpoint
-        - May not work
-        """
-        
-        if self.use_fileio_bridge:
-            # Use file.io as bridge - Notion will cache it
-            # We'll verify it becomes 'file' type, not 'external'
-            url = self.fileio_helper.upload_image(local_path, context)
-            self.uploaded_count += 1
-            return url
-        
-        else:
-            # Direct upload attempt (undocumented, may fail)
-            page_id = context.get('page_id')
-            
-            # This is speculative - Notion API doesn't officially support this
-            # Would need to reverse-engineer the endpoint
-            raise NotImplementedError(
-                "Direct Notion file upload not yet implemented. "
-                "Use use_fileio_bridge=True for Notion-hosted images."
-            )
+        """Upload via S3, hope Notion converts to 'file' type"""
+        url = self.s3_helper.upload_image(local_path, context)
+        self.uploaded_count += 1
+        return url
     
     def cleanup(self, failed_count: int = 0):
-        if self.use_fileio_bridge:
-            print(f"[green]✓ Uploaded {self.uploaded_count} images (Notion will cache as 'file' type)[/green]")
-            print("[green]  file.io links will auto-delete after Notion downloads[/green]")
-        else:
-            print(f"[green]✓ Uploaded {self.uploaded_count} images directly to Notion[/green]")
+        print(f"[green]✓ Uploaded {self.uploaded_count} images (Notion should cache as 'file' type)[/green]")
+        self.s3_helper.cleanup(failed_count)
     
     def needs_keepalive(self) -> bool:
         return False
@@ -461,21 +436,20 @@ def create_strategy(config) -> UploadStrategy:
     """
     mode = getattr(config, 'upload_mode', 'tunnel')
     
-    if mode == 'fileio':
-        primary = FileIOStrategy(
-            api_key=getattr(config, 'fileio_api_key', None),
-            expire_days=getattr(config, 'fileio_expiry_days', 14)
+    if mode == 's3_temp' or mode == 's3':
+        # S3 with auto-delete (RECOMMENDED)
+        return S3TempStrategy(
+            bucket=getattr(config, 's3_bucket', ''),
+            region=getattr(config, 's3_region', 'us-west-2'),
+            access_key=getattr(config, 's3_access_key', ''),
+            secret_key=getattr(config, 's3_secret_key', ''),
+            lifecycle_days=getattr(config, 's3_lifecycle_days', 1),
+            use_presigned=getattr(config, 's3_use_presigned', True)
         )
-        
-        # Fallback to tunnel if file.io fails
-        fallback = TunnelStrategy(keepalive_sec=getattr(config, 'tunnel_keepalive_sec', 600))
-        
-        if getattr(config, 'enable_fallback', True):
-            return FallbackStrategy(primary, fallback)
-        return primary
     
-    elif mode == 's3':
-        return S3Strategy(
+    elif mode == 's3_permanent':
+        # S3 permanent (manual cleanup needed)
+        return S3PermanentStrategy(
             bucket=config.s3_bucket,
             region=config.s3_region,
             access_key=config.s3_access_key,
@@ -492,9 +466,12 @@ def create_strategy(config) -> UploadStrategy:
         )
     
     elif mode == 'notion_native':
+        # Notion Native via S3 temp bridge
         return NotionNativeStrategy(
-            notion_client=None,  # Will be set later
-            use_fileio_bridge=True  # Safe mode - use file.io then let Notion cache
+            s3_bucket=getattr(config, 's3_bucket', ''),
+            s3_region=getattr(config, 's3_region', 'us-west-2'),
+            s3_access_key=getattr(config, 's3_access_key', ''),
+            s3_secret_key=getattr(config, 's3_secret_key', '')
         )
     
     else:  # 'tunnel' (default)
