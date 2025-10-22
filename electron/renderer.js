@@ -21,6 +21,15 @@ const retryBtn = document.getElementById('retry-btn');
 const stopBtn = document.getElementById('stop-btn');
 const logOutput = document.getElementById('log-output');
 
+// Upload mode elements
+const uploadModeSelect = document.getElementById('upload-mode');
+const modeDescription = document.getElementById('mode-description');
+const fileioConfig = document.getElementById('fileio-config');
+const tunnelConfig = document.getElementById('tunnel-config');
+const s3Config = document.getElementById('s3-config');
+const cloudflareConfig = document.getElementById('cloudflare-config');
+const notionConfig = document.getElementById('notion-config');
+
 // Summary elements
 const summarySection = document.getElementById('summary-section');
 const summaryPages = document.getElementById('summary-pages');
@@ -36,15 +45,56 @@ const progressPercent = document.getElementById('progress-percent');
 const progressTime = document.getElementById('progress-time');
 const progressEta = document.getElementById('progress-eta');
 
+// Handle upload mode changes
+uploadModeSelect.addEventListener('change', () => {
+  const mode = uploadModeSelect.value;
+  
+  // Hide all config sections
+  fileioConfig.style.display = 'none';
+  tunnelConfig.style.display = 'none';
+  s3Config.style.display = 'none';
+  cloudflareConfig.style.display = 'none';
+  notionConfig.style.display = 'none';
+  
+  // Show relevant config
+  const configMap = {
+    'fileio': fileioConfig,
+    'tunnel': tunnelConfig,
+    's3': s3Config,
+    'cloudflare': cloudflareConfig,
+    'notion_native': notionConfig
+  };
+  
+  if (configMap[mode]) {
+    configMap[mode].style.display = 'block';
+  }
+  
+  // Update description
+  const descriptions = {
+    'fileio': '🔥 Images upload to file.io and AUTO-DELETE after Notion downloads. No cleanup needed!',
+    'notion_native': '📦 Uses file.io bridge - Notion converts to permanent "file" type. Experimental.',
+    'tunnel': '🌐 Fast local serving via tunnel. May cause 404s if tunnel closes before Notion fetches.',
+    's3': '☁️ Upload to AWS S3. Permanent storage. Reliable but costs ~$1-5/month.',
+    'cloudflare': '☁️ Upload to Cloudflare R2. Cheaper than S3, no egress fees. Requires custom domain.'
+  };
+  
+  modeDescription.textContent = descriptions[mode] || '';
+  modeDescription.className = 'mode-help';
+});
+
 // Load config on startup
 (async () => {
   currentConfig = await electronAPI.loadConfig();
   notionTokenInput.value = currentConfig.NOTION_TOKEN || '';
   parentIdInput.value = currentConfig.PARENT_ID || '';
-  sourceDirInput.value = currentConfig.SOURCE_DIR || '/home/koto/C2Nv2/work 2';
+  sourceDirInput.value = currentConfig.SOURCE_DIR || '';
   maxColumnsInput.value = currentConfig.MAX_COLUMNS || 6;
-  preserveLayoutCheckbox.checked = currentConfig.PRESERVE_LAYOUT !== false; // Default true
+  preserveLayoutCheckbox.checked = currentConfig.PRESERVE_LAYOUT !== false;
   minColumnHeightInput.value = currentConfig.MIN_COLUMN_HEIGHT || 3;
+  
+  // Load upload mode settings
+  uploadModeSelect.value = currentConfig.UPLOAD_MODE || 'fileio';
+  uploadModeSelect.dispatchEvent(new Event('change'));  // Trigger mode change
 })();
 
 // Test connection
@@ -109,14 +159,43 @@ browseBtn.addEventListener('click', async () => {
 
 // Save config
 saveBtn.addEventListener('click', async () => {
+  const uploadMode = uploadModeSelect.value;
+  
   const config = {
     NOTION_TOKEN: notionTokenInput.value.trim(),
     PARENT_ID: parentIdInput.value.trim(),
     SOURCE_DIR: sourceDirInput.value.trim(),
     MAX_COLUMNS: parseInt(maxColumnsInput.value) || 6,
     PRESERVE_LAYOUT: preserveLayoutCheckbox.checked,
-    MIN_COLUMN_HEIGHT: parseInt(minColumnHeightInput.value) || 3
+    MIN_COLUMN_HEIGHT: parseInt(minColumnHeightInput.value) || 3,
+    UPLOAD_MODE: uploadMode,
+    USE_ASYNC: document.getElementById('use-async').checked
   };
+  
+  // Add mode-specific settings
+  if (uploadMode === 'fileio' || uploadMode === 'notion_native') {
+    config.FILEIO_API_KEY = document.getElementById('fileio-api-key')?.value || '';
+    config.FILEIO_EXPIRY_DAYS = parseInt(document.getElementById('fileio-expiry')?.value) || 14;
+  }
+  
+  if (uploadMode === 'tunnel') {
+    config.TUNNEL_KEEPALIVE_SEC = parseInt(document.getElementById('tunnel-keepalive')?.value) || 600;
+  }
+  
+  if (uploadMode === 's3') {
+    config.S3_BUCKET = document.getElementById('s3-bucket')?.value || '';
+    config.S3_REGION = document.getElementById('s3-region')?.value || '';
+    config.S3_ACCESS_KEY = document.getElementById('s3-access-key')?.value || '';
+    config.S3_SECRET_KEY = document.getElementById('s3-secret-key')?.value || '';
+  }
+  
+  if (uploadMode === 'cloudflare') {
+    config.CF_BUCKET = document.getElementById('cf-bucket')?.value || '';
+    config.CF_ACCOUNT_ID = document.getElementById('cf-account-id')?.value || '';
+    config.CF_ACCESS_KEY = document.getElementById('cf-access-key')?.value || '';
+    config.CF_SECRET_KEY = document.getElementById('cf-secret-key')?.value || '';
+    config.CF_PUBLIC_DOMAIN = document.getElementById('cf-public-domain')?.value || '';
+  }
 
   const result = await electronAPI.saveConfig(config);
   
