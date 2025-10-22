@@ -12,6 +12,17 @@ from flask import Flask, send_from_directory
 import shutil
 import requests
 
+from .constants import (
+    TUNNEL_STARTUP_TIMEOUT, 
+    TUNNEL_DNS_TIMEOUT, 
+    NGROK_API_TIMEOUT, 
+    NGROK_POLL_INTERVAL,
+    CLOUDFLARED_POLL_INTERVAL,
+    DNS_RESOLVE_INTERVAL,
+    HTTP_CHECK_TIMEOUT,
+    HTTP_CHECK_INTERVAL
+)
+
 class StaticServer:
     def __init__(self, root: Path, host: str = "127.0.0.1", port: Optional[int] = None):
         self.root = Path(root)
@@ -75,7 +86,7 @@ class Tunnel:
                 cloudflared_cmd, 'tunnel', '--url', self.local_url, '--loglevel', 'info'
             ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             # Parse stdout for trycloudflare URL
-            self.public_url = self._wait_cloudflared_url(timeout=10)
+            self.public_url = self._wait_cloudflared_url(timeout=TUNNEL_STARTUP_TIMEOUT)
             if self.public_url:
                 # Wait for DNS to propagate and tunnel to be accessible
                 self._wait_for_tunnel_ready(self.public_url)
@@ -84,12 +95,12 @@ class Tunnel:
         if has_ngrok:
             self.proc = subprocess.Popen(['ngrok', 'http', self.local_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             # Try local API to get tunnel public URL
-            self.public_url = self._wait_ngrok_url(timeout=10)
+            self.public_url = self._wait_ngrok_url(timeout=TUNNEL_STARTUP_TIMEOUT)
             return self.public_url or self.local_url
         # No tunnel available
         return self.local_url
 
-    def _wait_cloudflared_url(self, timeout: int = 10) -> Optional[str]:
+    def _wait_cloudflared_url(self, timeout: int = TUNNEL_STARTUP_TIMEOUT) -> Optional[str]:
         if not self.proc or not self.proc.stdout:
             return None
         url_re = re.compile(r"https?://[\w.-]+\.trycloudflare\.com")
@@ -101,7 +112,7 @@ class Tunnel:
             except Exception:
                 break
             if not line:
-                time.sleep(0.2)
+                time.sleep(CLOUDFLARED_POLL_INTERVAL)
                 continue
             lines.append(line)
             m = url_re.search(line)
@@ -109,11 +120,11 @@ class Tunnel:
                 return m.group(0)
         return None
 
-    def _wait_ngrok_url(self, timeout: int = 10) -> Optional[str]:
+    def _wait_ngrok_url(self, timeout: int = TUNNEL_STARTUP_TIMEOUT) -> Optional[str]:
         end = time.time() + timeout
         while time.time() < end:
             try:
-                r = requests.get('http://127.0.0.1:4040/api/tunnels', timeout=1)
+                r = requests.get('http://127.0.0.1:4040/api/tunnels', timeout=NGROK_API_TIMEOUT)
                 if r.ok:
                     data = r.json()
                     tunnels = data.get('tunnels') or []
@@ -123,10 +134,10 @@ class Tunnel:
                             return pub
             except Exception:
                 pass
-            time.sleep(0.5)
+            time.sleep(NGROK_POLL_INTERVAL)
         return None
     
-    def _wait_for_tunnel_ready(self, url: str, timeout: int = 15) -> bool:
+    def _wait_for_tunnel_ready(self, url: str, timeout: int = TUNNEL_DNS_TIMEOUT) -> bool:
         """Wait for tunnel URL to be accessible"""
         import socket
         end = time.time() + timeout
@@ -138,12 +149,12 @@ class Tunnel:
                 socket.gethostbyname(hostname)
                 break
             except socket.gaierror:
-                time.sleep(1)
+                time.sleep(DNS_RESOLVE_INTERVAL)
         
         # Then wait for HTTP to be accessible
         while time.time() < end:
             try:
-                r = requests.get(url, timeout=3)
+                r = requests.get(url, timeout=HTTP_CHECK_TIMEOUT)
                 if r.status_code == 200:
                     return True
             except Exception:

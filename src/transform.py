@@ -1,17 +1,19 @@
 from typing import Any, Dict, List, Optional
 
+from .constants import NOTION_TEXT_LIMIT, MAX_COLUMNS_PER_ROW, MIN_COLUMN_HEIGHT
+
 def rich_text(text: str) -> List[Dict[str, Any]]:
-    # Notion has a 2000 character limit per rich text item
-    if len(text) <= 2000:
+    # Notion has a NOTION_TEXT_LIMIT character limit per rich text item
+    if len(text) <= NOTION_TEXT_LIMIT:
         return [{"type": "text", "text": {"content": text}}]
     
     # Split long text into multiple rich text items
     parts = []
-    for i in range(0, len(text), 2000):
-        parts.append({"type": "text", "text": {"content": text[i:i+2000]}})
+    for i in range(0, len(text), NOTION_TEXT_LIMIT):
+        parts.append({"type": "text", "text": {"content": text[i:i+NOTION_TEXT_LIMIT]}})
     return parts
 
-def split_long_paragraph(text: str, max_length: int = 2000) -> List[Dict[str, Any]]:
+def split_long_paragraph(text: str, max_length: int = NOTION_TEXT_LIMIT) -> List[Dict[str, Any]]:
     """Split a long paragraph into multiple paragraph blocks."""
     if len(text) <= max_length:
         return [{"object":"block","type":"paragraph","paragraph":{"rich_text": rich_text(text)}}]
@@ -39,8 +41,8 @@ def split_long_paragraph(text: str, max_length: int = 2000) -> List[Dict[str, An
     
     return blocks
 
-def to_notion_blocks(ast: Dict[str, Any], image_base_url: str, max_cols: int = 6, 
-                     preserve_table_layout: bool = True, min_column_height: int = 3) -> List[Dict[str, Any]]:
+def to_notion_blocks(ast: Dict[str, Any], image_base_url: str, max_cols: int = MAX_COLUMNS_PER_ROW,
+                     preserve_table_layout: bool = True, min_column_height: int = MIN_COLUMN_HEIGHT) -> List[Dict[str, Any]]:
     """
     Convert AST to Notion blocks.
     
@@ -58,7 +60,7 @@ def to_notion_blocks(ast: Dict[str, Any], image_base_url: str, max_cols: int = 6
             blocks.append({f"heading_{min(3, max(1, b.get('level',1)))}": {"rich_text": rich_text(b.get('text',''))}, "object":"block", "type": f"heading_{min(3, max(1, b.get('level',1)))}"})
         elif t == 'paragraph':
             text = b.get('text','')
-            if len(text) > 2000:
+            if len(text) > NOTION_TEXT_LIMIT:
                 blocks.extend(split_long_paragraph(text))
             else:
                 blocks.append({"object":"block","type":"paragraph","paragraph":{"rich_text": rich_text(text)}})
@@ -67,14 +69,14 @@ def to_notion_blocks(ast: Dict[str, Any], image_base_url: str, max_cols: int = 6
                 key = 'numbered_list_item' if b.get('ordered') else 'bulleted_list_item'
                 text = it.get('text','')
                 # For list items, truncate if too long rather than split
-                if len(text) > 2000:
-                    text = text[:1997] + "..."
+                if len(text) > NOTION_TEXT_LIMIT:
+                    text = text[:NOTION_TEXT_LIMIT-3] + "..."
                 blocks.append({"object":"block","type":key, key:{"rich_text": rich_text(text)}})
         elif t == 'code':
             text = b.get('text','')
             # For code blocks, truncate if too long
-            if len(text) > 2000:
-                text = text[:1997] + "..."
+            if len(text) > NOTION_TEXT_LIMIT:
+                text = text[:NOTION_TEXT_LIMIT-3] + "..."
             blocks.append({"object":"block","type":"code","code":{"rich_text": rich_text(text), "language":"plain text"}})
         elif t == 'image':
             url = b.get('src','')
@@ -142,7 +144,7 @@ def _cell_children(children: List[Dict[str, Any]], image_base_url: str) -> List[
         t = ch['type']
         if t == 'paragraph':
             text = ch.get('text','')
-            if len(text) > 2000:
+            if len(text) > NOTION_TEXT_LIMIT:
                 out.extend(split_long_paragraph(text))
             else:
                 out.append({"object":"block","type":"paragraph","paragraph":{"rich_text": rich_text(text)}})
@@ -150,13 +152,13 @@ def _cell_children(children: List[Dict[str, Any]], image_base_url: str) -> List[
             for it in ch.get('items', []):
                 key = 'numbered_list_item' if ch.get('ordered') else 'bulleted_list_item'
                 text = it.get('text','')
-                if len(text) > 2000:
-                    text = text[:1997] + "..."
+                if len(text) > NOTION_TEXT_LIMIT:
+                    text = text[:NOTION_TEXT_LIMIT-3] + "..."
                 out.append({"object":"block","type":key, key:{"rich_text": rich_text(text)}})
         elif t == 'code':
             text = ch.get('text','')
-            if len(text) > 2000:
-                text = text[:1997] + "..."
+            if len(text) > NOTION_TEXT_LIMIT:
+                text = text[:NOTION_TEXT_LIMIT-3] + "..."
             out.append({"object":"block","type":"code","code":{"rich_text": rich_text(text), "language":"plain text"}})
         elif t == 'image':
             url = ch.get('src','')
