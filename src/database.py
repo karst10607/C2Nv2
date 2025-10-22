@@ -4,6 +4,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+from .constants import DEFAULT_RECENT_RUNS_LIMIT, MAX_RETRY_COUNT
+
 
 class ImportDatabase:
     """SQLite database for tracking imports and failed images"""
@@ -93,7 +95,7 @@ class ImportDatabase:
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
             ''', (run_id, file_path, page_id, title, expected_images, verified_images, error))
     
-    def get_pending_retries(self, max_retry_count: int = 3) -> List[Dict[str, Any]]:
+    def get_pending_retries(self, max_retry_count: int = MAX_RETRY_COUNT) -> List[Dict[str, Any]]:
         """Get pages that need retry (status=pending, retry_count < max)"""
         cursor = self.conn.execute('''
             SELECT id, file_path, page_id, title, expected_images, verified_images, retry_count
@@ -141,7 +143,7 @@ class ImportDatabase:
                 UPDATE failed_pages SET status = 'resolved' WHERE id = ?
             ''', (page_db_id,))
     
-    def get_recent_runs(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_recent_runs(self, limit: int = DEFAULT_RECENT_RUNS_LIMIT) -> List[Dict[str, Any]]:
         """Get recent import runs"""
         cursor = self.conn.execute('''
             SELECT * FROM import_runs

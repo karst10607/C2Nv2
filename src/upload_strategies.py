@@ -11,6 +11,13 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import requests
 
+from .constants import (
+    DEFAULT_TUNNEL_KEEPALIVE,
+    TUNNEL_KEEPALIVE_PER_FAILED_PAGE,
+    S3_PRESIGNED_URL_EXPIRY,
+    S3_DEFAULT_LIFECYCLE_DAYS
+)
+
 
 class UploadStrategy(ABC):
     """Base class for image upload strategies"""
@@ -79,7 +86,7 @@ class TunnelStrategy(UploadStrategy):
     Cons: Tunnel expires after keepalive, causes 404s if Notion delays
     """
     
-    def __init__(self, keepalive_sec: int = 600):
+    def __init__(self, keepalive_sec: int = DEFAULT_TUNNEL_KEEPALIVE):
         self.keepalive_sec = keepalive_sec
         self.server = None
         self.tunnel = None
@@ -107,7 +114,7 @@ class TunnelStrategy(UploadStrategy):
         # Extend keepalive if there are failures
         keepalive = self.keepalive_sec
         if failed_count > 0:
-            extra = failed_count * 30  # 30s per failed page
+            extra = failed_count * TUNNEL_KEEPALIVE_PER_FAILED_PAGE
             keepalive += extra
             print(f"[yellow]Extending keepalive by {extra}s for {failed_count} failed pages[/yellow]")
         
@@ -145,7 +152,7 @@ class S3TempStrategy(UploadStrategy):
     """
     
     def __init__(self, bucket: str, region: str, access_key: str, secret_key: str, 
-                 lifecycle_days: int = 1, use_presigned: bool = True):
+                 lifecycle_days: int = S3_DEFAULT_LIFECYCLE_DAYS, use_presigned: bool = True):
         self.bucket = bucket
         self.region = region
         self.access_key = access_key
@@ -194,7 +201,7 @@ class S3TempStrategy(UploadStrategy):
             url = self.client.generate_presigned_url(
                 'get_object',
                 Params={'Bucket': self.bucket, 'Key': key},
-                ExpiresIn=3600  # 1 hour
+                ExpiresIn=S3_PRESIGNED_URL_EXPIRY
             )
         else:
             # Public URL (requires bucket to be public-read)
@@ -443,7 +450,7 @@ def create_strategy(config) -> UploadStrategy:
             region=getattr(config, 's3_region', 'us-west-2'),
             access_key=getattr(config, 's3_access_key', ''),
             secret_key=getattr(config, 's3_secret_key', ''),
-            lifecycle_days=getattr(config, 's3_lifecycle_days', 1),
+            lifecycle_days=getattr(config, 's3_lifecycle_days', S3_DEFAULT_LIFECYCLE_DAYS),
             use_presigned=getattr(config, 's3_use_presigned', True)
         )
     
@@ -476,6 +483,6 @@ def create_strategy(config) -> UploadStrategy:
     
     else:  # 'tunnel' (default)
         return TunnelStrategy(
-            keepalive_sec=getattr(config, 'tunnel_keepalive_sec', 600)
+            keepalive_sec=getattr(config, 'tunnel_keepalive_sec', DEFAULT_TUNNEL_KEEPALIVE)
         )
 

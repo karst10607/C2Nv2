@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Tuple
 from rich import print
 
 from .notion_api import Notion
+from .constants import DEFAULT_VERIFICATION_TIMEOUT, VERIFICATION_POLL_INTERVAL
 
 
 class ImageVerifier:
@@ -86,7 +87,7 @@ class ImageVerifier:
         return count
     
     def verify_page_images(self, page_id: str, expected_count: int, 
-                          timeout: int = 60, poll_interval: int = 5) -> Tuple[bool, int]:
+                          timeout: int = DEFAULT_VERIFICATION_TIMEOUT, poll_interval: int = VERIFICATION_POLL_INTERVAL) -> Tuple[bool, int]:
         """
         Poll Notion API to verify images have been cached.
         

@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from pathlib import Path
 from .config import AppConfig
+from .constants import GUI_ENTRY_WIDTH
 
 TITLE = "Notion Importer Settings"
 
@@ -13,17 +14,17 @@ class App:
         root.geometry("520x260")
 
         tk.Label(root, text="Notion Token").grid(row=0, column=0, sticky="w", padx=8, pady=6)
-        self.token = tk.Entry(root, width=60, show="")
+        self.token = tk.Entry(root, width=GUI_ENTRY_WIDTH, show="")
         self.token.insert(0, self.cfg.notion_token or "")
         self.token.grid(row=0, column=1, padx=8, pady=6)
 
         tk.Label(root, text="Parent ID (optional)").grid(row=1, column=0, sticky="w", padx=8, pady=6)
-        self.parent = tk.Entry(root, width=60)
+        self.parent = tk.Entry(root, width=GUI_ENTRY_WIDTH)
         self.parent.insert(0, self.cfg.parent_id or "")
         self.parent.grid(row=1, column=1, padx=8, pady=6)
 
         tk.Label(root, text="Source HTML Folder").grid(row=2, column=0, sticky="w", padx=8, pady=6)
-        self.source = tk.Entry(root, width=60)
+        self.source = tk.Entry(root, width=GUI_ENTRY_WIDTH)
         self.source.insert(0, self.cfg.source_dir)
         self.source.grid(row=2, column=1, padx=8, pady=6)
         tk.Button(root, text="Browse", command=self.browse).grid(row=2, column=2, padx=8)

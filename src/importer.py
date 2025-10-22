@@ -12,6 +12,21 @@ from .notion_api import Notion
 from .database import ImportDatabase
 from .verification import ImageVerifier
 from .upload_strategies import create_strategy
+from .constants import (
+    DEFAULT_TUNNEL_KEEPALIVE,
+    MAX_COLUMNS_PER_ROW,
+    MIN_COLUMN_HEIGHT,
+    SECONDS_PER_PAGE_ESTIMATE,
+    SECONDS_PER_IMAGE_ESTIMATE,
+    INITIAL_IMAGE_WAIT,
+    MIN_IMAGE_TIMEOUT,
+    MAX_IMAGE_TIMEOUT,
+    IMAGE_TIMEOUT_BASE,
+    IMAGE_TIMEOUT_PER_IMAGE,
+    TUNNEL_KEEPALIVE_PER_FAILED_PAGE,
+    MAX_FAILED_PAGES_DISPLAY,
+    SECONDS_PER_MINUTE
+)
 
 
 def count_images_in_blocks(blocks: List[Dict[str, Any]]) -> int:
@@ -78,7 +93,7 @@ def main(argv: Optional[list] = None):
     ap.add_argument('--source-dir', default=None)
     ap.add_argument('--run', action='store_true', help='Perform writes to Notion')
     ap.add_argument('--dry-run', action='store_true', help='Parse and plan only')
-    ap.add_argument('--max-columns', type=int, default=6)
+    ap.add_argument('--max-columns', type=int, default=MAX_COLUMNS_PER_ROW)
     ap.add_argument('--parent-id', default=None)
     args = ap.parse_args(argv)
 
@@ -106,7 +121,7 @@ def main(argv: Optional[list] = None):
     strategy_config.cf_access_key = getattr(cfg, 'cf_access_key', '')
     strategy_config.cf_secret_key = getattr(cfg, 'cf_secret_key', '')
     strategy_config.cf_public_domain = getattr(cfg, 'cf_public_domain', '')
-    strategy_config.tunnel_keepalive_sec = getattr(cfg, 'tunnel_keepalive_sec', 600)
+    strategy_config.tunnel_keepalive_sec = getattr(cfg, 'tunnel_keepalive_sec', DEFAULT_TUNNEL_KEEPALIVE)
     
     # Initialize upload strategy
     upload_strategy = create_strategy(strategy_config)
@@ -165,7 +180,7 @@ def main(argv: Optional[list] = None):
             image_base_url=image_base_url, 
             max_cols=args.max_columns,
             preserve_table_layout=True,
-            min_column_height=3
+            min_column_height=MIN_COLUMN_HEIGHT
         )
         
         # For S3/CDN strategies, upload images and update URLs in blocks
@@ -190,8 +205,8 @@ def main(argv: Optional[list] = None):
     print(f"  Blocks: {total_blocks}")
     print(f"  Images: {total_images}")
     if args.run:
-        est_time = len(html_files) * 15 + total_images * 8  # Rough estimate
-        print(f"  Est. time: ~{est_time // 60}m {est_time % 60}s")
+        est_time = len(html_files) * SECONDS_PER_PAGE_ESTIMATE + total_images * SECONDS_PER_IMAGE_ESTIMATE
+        print(f"  Est. time: ~{est_time // SECONDS_PER_MINUTE}m {est_time % SECONDS_PER_MINUTE}s")
     print(f"[green]{'═' * 22}[/green]\n")
     
     # Start database tracking for this import run
@@ -225,15 +240,15 @@ def main(argv: Optional[list] = None):
             actual_verified = 0
             if image_count > 0:
                 # Give Notion's backend a head start before polling
-                print(f"  [dim]Waiting 10s for Notion to start fetching images...[/dim]")
-                time.sleep(10)
+                print(f"  [dim]Waiting {INITIAL_IMAGE_WAIT}s for Notion to start fetching images...[/dim]")
+                time.sleep(INITIAL_IMAGE_WAIT)
                 
                 # Timeout scales with image count: 10s base + 8s per image
-                timeout = max(30, min(180, 10 + image_count * 8))  # 30s-180s range
+                timeout = max(MIN_IMAGE_TIMEOUT, min(MAX_IMAGE_TIMEOUT, IMAGE_TIMEOUT_BASE + image_count * IMAGE_TIMEOUT_PER_IMAGE))
                 
                 # Verify using ImageVerifier
                 images_ok, actual_verified = verifier.verify_page_images(
-                    page_id, image_count, timeout=timeout, poll_interval=5
+                    page_id, image_count, timeout=timeout
                 )
                 
                 # Record failures in database
@@ -277,10 +292,10 @@ def main(argv: Optional[list] = None):
         print(f"\n[yellow]⚠ {len(failed_pages)} page(s) with incomplete images:[/yellow]")
         print(f"[yellow]  Database: {db.db_path}[/yellow]")
         print(f"[yellow]  JSON export: {failed_path}[/yellow]")
-        for page in failed_pages[:10]:  # Show first 10
+        for page in failed_pages[:MAX_FAILED_PAGES_DISPLAY]:
             print(f"[yellow]  - {page['title']}[/yellow]")
-        if len(failed_pages) > 10:
-            print(f"[yellow]  ... and {len(failed_pages) - 10} more[/yellow]")
+        if len(failed_pages) > MAX_FAILED_PAGES_DISPLAY:
+            print(f"[yellow]  ... and {len(failed_pages) - MAX_FAILED_PAGES_DISPLAY} more[/yellow]")
     
     # Cleanup upload strategy (keepalive if needed, or just cleanup)
     if not args.dry_run:

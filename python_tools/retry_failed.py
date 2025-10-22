@@ -16,9 +16,10 @@ from src.database import ImportDatabase
 from src.notion_api import Notion
 from src.verification import ImageVerifier
 from rich import print
+from src.constants import MAX_RETRY_COUNT
 
 
-def retry_failed_images(max_retry_count: int = 3):
+def retry_failed_images(max_retry_count: int = MAX_RETRY_COUNT):
     """
     Retry pages with failed images.
     Re-checks Notion to see if images eventually loaded.
