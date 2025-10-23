@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from .image_utils import should_skip_image, extract_image_src
+from .processors import MediaProcessor
 
 # Minimal AST nodes
 # Node: { 'type': 'heading'|'paragraph'|'list'|'code'|'image'|'table', 'level', 'text', 'children', 'rows' }
