@@ -73,14 +73,16 @@ grep -n "from .models.config import StrategyConfig" src/importer.py
 ### ✅ Phase 3: Extract Common Image Handling Logic
 **Target Version:** 3.1.5  
 **Estimated Time:** 4-5 hours  
-**Actual Time:** _[To be filled]_
+**Actual Time:** 1.5 hours (Phase 3.1 completed)
 
 #### Completion Criteria:
-- [ ] Create `src/processors/image_processor.py`
-- [ ] Remove duplicate image counting logic
-- [ ] Remove duplicate image URL handling
-- [ ] All image operations use ImageProcessor
-- [ ] Tests for ImageProcessor
+- [x] Create `src/processors/media_processor.py` (expanded from image_processor)
+- [x] Remove duplicate image counting logic
+- [x] Remove duplicate image URL handling  
+- [x] All image operations use MediaProcessor
+- [x] Tests for MediaProcessor
+- [ ] Phase 3.2: Add advanced media support (SVG, documents)
+- [ ] Phase 3.3: Media conversion pipeline
 
 #### Files to Modify:
 - Create: `src/processors/image_processor.py`, `src/processors/__init__.py`

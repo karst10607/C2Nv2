@@ -13,6 +13,7 @@ from .database import ImportDatabase
 from .verification import ImageVerifier
 from .upload_strategies import create_strategy
 from .models import ImportConfig, ConfigurationError, UploadError, ErrorCode
+from .processors import MediaProcessor
 from .constants import (
     SECONDS_PER_PAGE_ESTIMATE,
     SECONDS_PER_IMAGE_ESTIMATE,
@@ -26,18 +27,11 @@ from .constants import (
 )
 
 
+# Moved to MediaProcessor - keeping for backwards compatibility
 def count_images_in_blocks(blocks: List[Dict[str, Any]]) -> int:
     """Count total images in a list of blocks (including nested in column_list)"""
-    count = 0
-    for b in blocks:
-        if b.get('type') == 'image':
-            count += 1
-        elif b.get('type') == 'column_list':
-            for col in b.get('column_list', {}).get('children', []):
-                for child in col.get('column', {}).get('children', []):
-                    if child.get('type') == 'image':
-                        count += 1
-    return count
+    processor = MediaProcessor()
+    return processor.count_images_in_blocks(blocks)
 
 
 def upload_images_in_blocks(blocks: List[Dict[str, Any]], strategy, source_dir: Path, context: Dict) -> List[Dict[str, Any]]:
@@ -125,6 +119,13 @@ def main(argv: Optional[list] = None):
     print(f"[green]Upload strategy:[/green] {upload_strategy.get_name()}")
     if public:
         print(f"[green]Base URL:[/green] {public}")
+    
+    # Initialize media processor and scan for media files
+    media_processor = MediaProcessor()
+    print(f"\n[cyan]Scanning for media files...[/cyan]")
+    media_inventory = media_processor.scan_directory(Path(source_dir))
+    if media_inventory.total_count > 0:
+        print(media_inventory.get_summary())
 
     # Notion
     token = import_config.base.notion_token

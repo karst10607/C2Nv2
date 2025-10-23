@@ -8,6 +8,7 @@ from rich import print
 
 from .notion_api import Notion
 from .constants import DEFAULT_VERIFICATION_TIMEOUT, VERIFICATION_POLL_INTERVAL
+from .processors import MediaProcessor
 
 
 class ImageVerifier:
@@ -47,16 +48,20 @@ class ImageVerifier:
         Returns:
             Count of images with cached URLs
         """
-        verified_count = 0
+        # Get all image blocks using MediaProcessor
+        processor = MediaProcessor()
+        image_blocks = processor.extract_images_from_blocks(blocks)
         
+        # Count verified images
+        verified_count = 0
+        for img_block in image_blocks:
+            url = self.get_image_url(img_block)
+            if url and self.is_cached_url(url):
+                verified_count += 1
+        
+        # Also check nested column_list blocks (if they have IDs)
         for block in blocks:
-            if block.get('type') == 'image':
-                url = self.get_image_url(block)
-                if url and self.is_cached_url(url):
-                    verified_count += 1
-            
-            # Check column_list children (nested structure)
-            elif block.get('type') == 'column_list':
+            if block.get('type') == 'column_list' and block.get('id'):
                 verified_count += self._count_images_in_column_list(block['id'])
         
         return verified_count
