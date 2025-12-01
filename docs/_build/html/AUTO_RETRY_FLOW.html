@@ -1,0 +1,313 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Auto-Retry Failed Images: How It Works &mdash; C2N Importer 2.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+      <link rel="stylesheet" type="text/css" href="_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css" />
+      <link rel="stylesheet" type="text/css" href="_static/sphinx-design.min.css?v=95c83b7e" />
+      <link rel="stylesheet" type="text/css" href="_static/custom.css?v=dd1e613a" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=51b770b3"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+      <script src="_static/copybutton.js?v=30646c52"></script>
+      <script src="_static/design-tabs.js?v=f930bc37"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #2980B9" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            C2N Importer
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <!-- Local TOC -->
+              <div class="local-toc"><ul>
+<li><a class="reference internal" href="#">Auto-Retry Failed Images: How It Works</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#the-complete-flow">The Complete Flow</a><ul>
+<li><a class="reference internal" href="#initial-import-process">1. Initial Import Process</a></li>
+<li><a class="reference internal" href="#what-gets-stored-in-database">2. What Gets Stored in Database</a></li>
+<li><a class="reference internal" href="#auto-retry-process">3. Auto-Retry Process</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#key-points">Key Points</a><ul>
+<li><a class="reference internal" href="#what-auto-retry-does">What Auto-Retry DOES:</a></li>
+<li><a class="reference internal" href="#what-auto-retry-does-not">What Auto-Retry DOES NOT:</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#why-images-might-eventually-verify">Why Images Might Eventually Verify</a></li>
+<li><a class="reference internal" href="#understanding-image-urls">Understanding Image URLs</a><ul>
+<li><a class="reference internal" href="#original-upload-external-url">Original Upload (External URL)</a></li>
+<li><a class="reference internal" href="#after-notion-caches-cdn-url">After Notion Caches (CDN URL)</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#database-queries-used">Database Queries Used</a><ul>
+<li><a class="reference internal" href="#get-pending-retries">Get Pending Retries</a></li>
+<li><a class="reference internal" href="#update-after-retry">Update After Retry</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#when-to-use-auto-retry">When to Use Auto-Retry</a><ul>
+<li><a class="reference internal" href="#good-cases">Good Cases:</a></li>
+<li><a class="reference internal" href="#won-t-help">Won’t Help:</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#manual-verification">Manual Verification</a></li>
+<li><a class="reference internal" href="#summary">Summary</a></li>
+</ul>
+</li>
+</ul>
+</div>
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #2980B9" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">C2N Importer</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Auto-Retry Failed Images: How It Works</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/AUTO_RETRY_FLOW.md.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="auto-retry-failed-images-how-it-works">
+<h1>Auto-Retry Failed Images: How It Works<a class="headerlink" href="#auto-retry-failed-images-how-it-works" title="Link to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>The auto-retry mechanism <strong>DOES NOT re-upload images</strong>. Instead, it <strong>re-checks</strong> if Notion has successfully cached images that were previously uploaded.</p>
+</section>
+<section id="the-complete-flow">
+<h2>The Complete Flow<a class="headerlink" href="#the-complete-flow" title="Link to this heading"></a></h2>
+<section id="initial-import-process">
+<h3>1. Initial Import Process<a class="headerlink" href="#initial-import-process" title="Link to this heading"></a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>HTML Files → Parse → Transform → Create Notion Pages → Upload Images → Verify
+                                                                          ↓
+                                                                    If Failed → Store in DB
+</pre></div>
+</div>
+</section>
+<section id="what-gets-stored-in-database">
+<h3>2. What Gets Stored in Database<a class="headerlink" href="#what-gets-stored-in-database" title="Link to this heading"></a></h3>
+<p>When images fail verification, the database stores:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">page_id</span></code>: The Notion page UUID</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">expected_images</span></code>: Total image count in the page</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">verified_images</span></code>: How many were successfully cached by Notion</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">file_path</span></code>: Original HTML source (for reference only)</p></li>
+</ul>
+</section>
+<section id="auto-retry-process">
+<h3>3. Auto-Retry Process<a class="headerlink" href="#auto-retry-process" title="Link to this heading"></a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>Click &quot;Auto-Retry Failed&quot; Button
+        ↓
+1. Query Database
+   - Get all failed pages where retry_count &lt; 3
+   - Each page has: page_id, expected_images, verified_images
+        ↓
+2. For Each Failed Page:
+   a. Call Notion API: get_blocks(page_id)
+      - Fetches current page content from Notion
+      - Gets ALL blocks including nested column_list blocks
+        ↓
+   b. Count Verified Images
+      - Extract all image blocks from the response
+      - Check each image URL
+      - Count URLs that point to Notion&#39;s CDN
+        ↓
+   c. Compare Results
+      - If verified_count &gt;= expected_count → Mark as resolved
+      - If still missing images → Update retry_count, record error
+        ↓
+3. Update Database
+   - Increment retry_count
+   - Update last_retry_timestamp
+   - Record success/failure status
+</pre></div>
+</div>
+</section>
+</section>
+<section id="key-points">
+<h2>Key Points<a class="headerlink" href="#key-points" title="Link to this heading"></a></h2>
+<section id="what-auto-retry-does">
+<h3>What Auto-Retry DOES:<a class="headerlink" href="#what-auto-retry-does" title="Link to this heading"></a></h3>
+<ol class="arabic simple">
+<li><p><strong>Queries Notion API</strong> to get current page state</p></li>
+<li><p><strong>Counts cached images</strong> by checking if URLs point to Notion’s CDN</p></li>
+<li><p><strong>Updates database</strong> with current verification status</p></li>
+<li><p><strong>Tracks retry attempts</strong> to avoid infinite loops</p></li>
+</ol>
+</section>
+<section id="what-auto-retry-does-not">
+<h3>What Auto-Retry DOES NOT:<a class="headerlink" href="#what-auto-retry-does-not" title="Link to this heading"></a></h3>
+<ol class="arabic simple">
+<li><p><strong>Does NOT re-upload</strong> images from attachment folders</p></li>
+<li><p><strong>Does NOT modify</strong> the Notion page content</p></li>
+<li><p><strong>Does NOT access</strong> local HTML or attachment files</p></li>
+<li><p><strong>Does NOT create</strong> new image blocks</p></li>
+</ol>
+</section>
+</section>
+<section id="why-images-might-eventually-verify">
+<h2>Why Images Might Eventually Verify<a class="headerlink" href="#why-images-might-eventually-verify" title="Link to this heading"></a></h2>
+<ol class="arabic simple">
+<li><p><strong>Notion Processing Delay</strong>: Large images take time to process</p></li>
+<li><p><strong>CDN Propagation</strong>: Images need to propagate to Notion’s CDN</p></li>
+<li><p><strong>Rate Limiting</strong>: Notion might delay processing during high load</p></li>
+<li><p><strong>Network Issues</strong>: Temporary failures that resolve later</p></li>
+</ol>
+</section>
+<section id="understanding-image-urls">
+<h2>Understanding Image URLs<a class="headerlink" href="#understanding-image-urls" title="Link to this heading"></a></h2>
+<section id="original-upload-external-url">
+<h3>Original Upload (External URL)<a class="headerlink" href="#original-upload-external-url" title="Link to this heading"></a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">your</span><span class="o">-</span><span class="n">tunnel</span><span class="o">.</span><span class="n">com</span><span class="o">/</span><span class="n">attachments</span><span class="o">/</span><span class="mi">2753397032</span><span class="o">/</span><span class="n">image</span><span class="o">.</span><span class="n">png</span>
+<span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">your</span><span class="o">-</span><span class="n">s3</span><span class="o">-</span><span class="n">bucket</span><span class="o">.</span><span class="n">com</span><span class="o">/</span><span class="n">attachments</span><span class="o">/</span><span class="mi">2753397032</span><span class="o">/</span><span class="n">image</span><span class="o">.</span><span class="n">png</span>
+</pre></div>
+</div>
+</section>
+<section id="after-notion-caches-cdn-url">
+<h3>After Notion Caches (CDN URL)<a class="headerlink" href="#after-notion-caches-cdn-url" title="Link to this heading"></a></h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">prod</span><span class="o">-</span><span class="n">files</span><span class="o">-</span><span class="n">secure</span><span class="o">.</span><span class="n">s3</span><span class="o">.</span><span class="n">us</span><span class="o">-</span><span class="n">west</span><span class="o">-</span><span class="mf">2.</span><span class="n">amazonaws</span><span class="o">.</span><span class="n">com</span><span class="o">/</span><span class="n">workspace</span><span class="o">-</span><span class="nb">id</span><span class="o">/</span><span class="n">block</span><span class="o">-</span><span class="nb">id</span><span class="o">/</span><span class="n">image</span><span class="o">.</span><span class="n">png</span>
+<span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">notion</span><span class="o">.</span><span class="n">so</span><span class="o">/</span><span class="n">image</span><span class="o">/</span><span class="n">https</span><span class="o">%</span><span class="mi">3</span><span class="n">A</span><span class="o">%</span><span class="mi">2</span><span class="n">F</span><span class="o">%</span><span class="mi">2</span><span class="n">Fs3</span><span class="o">.</span><span class="n">us</span><span class="o">-</span><span class="n">west</span><span class="o">...</span>
+</pre></div>
+</div>
+<p>The retry process checks if this transformation has occurred.</p>
+</section>
+</section>
+<section id="database-queries-used">
+<h2>Database Queries Used<a class="headerlink" href="#database-queries-used" title="Link to this heading"></a></h2>
+<section id="get-pending-retries">
+<h3>Get Pending Retries<a class="headerlink" href="#get-pending-retries" title="Link to this heading"></a></h3>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">failed_pages</span><span class="w"> </span>
+<span class="k">WHERE</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;pending&#39;</span><span class="w"> </span><span class="k">AND</span><span class="w"> </span><span class="n">retry_count</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">3</span>
+<span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">retry_count</span><span class="w"> </span><span class="k">ASC</span>
+</pre></div>
+</div>
+</section>
+<section id="update-after-retry">
+<h3>Update After Retry<a class="headerlink" href="#update-after-retry" title="Link to this heading"></a></h3>
+<div class="highlight-sql notranslate"><div class="highlight"><pre><span></span><span class="k">UPDATE</span><span class="w"> </span><span class="n">failed_pages</span>
+<span class="k">SET</span><span class="w"> </span><span class="n">retry_count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">retry_count</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">    </span><span class="n">verified_images</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">?</span><span class="p">,</span>
+<span class="w">    </span><span class="n">last_retry_timestamp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">?</span><span class="p">,</span>
+<span class="w">    </span><span class="n">last_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">?</span><span class="p">,</span>
+<span class="w">    </span><span class="n">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">?</span>
+<span class="k">WHERE</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">?</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="when-to-use-auto-retry">
+<h2>When to Use Auto-Retry<a class="headerlink" href="#when-to-use-auto-retry" title="Link to this heading"></a></h2>
+<section id="good-cases">
+<h3>Good Cases:<a class="headerlink" href="#good-cases" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p>After waiting 5-10 minutes for Notion to process</p></li>
+<li><p>When you see “Still missing X images” errors</p></li>
+<li><p>After fixing network/tunnel issues</p></li>
+</ul>
+</section>
+<section id="won-t-help">
+<h3>Won’t Help:<a class="headerlink" href="#won-t-help" title="Link to this heading"></a></h3>
+<ul class="simple">
+<li><p>If source images were deleted</p></li>
+<li><p>If Notion page was deleted (“Could not find block”)</p></li>
+<li><p>If images exceed Notion’s size limits</p></li>
+<li><p>If upload strategy failed initially</p></li>
+</ul>
+</section>
+</section>
+<section id="manual-verification">
+<h2>Manual Verification<a class="headerlink" href="#manual-verification" title="Link to this heading"></a></h2>
+<p>To manually check if an image is cached:</p>
+<ol class="arabic simple">
+<li><p>Open the Notion page</p></li>
+<li><p>Right-click an image → “Copy Image Address”</p></li>
+<li><p>Check if URL contains Notion CDN domains</p></li>
+<li><p>Or refresh the page - cached images load instantly</p></li>
+</ol>
+</section>
+<section id="summary">
+<h2>Summary<a class="headerlink" href="#summary" title="Link to this heading"></a></h2>
+<p>Auto-retry is a <strong>verification re-check</strong>, not a re-upload. It’s useful when:</p>
+<ul class="simple">
+<li><p>Notion needs more time to process images</p></li>
+<li><p>You want to verify current state without re-importing</p></li>
+<li><p>You need to track which pages still have issues</p></li>
+</ul>
+<p>For actual re-uploads, you would need to:</p>
+<ol class="arabic simple">
+<li><p>Delete the Notion page</p></li>
+<li><p>Run a fresh import</p></li>
+<li><p>Or manually update image URLs in Notion</p></li>
+</ol>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, C2N Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

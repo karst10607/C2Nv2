@@ -6,7 +6,9 @@ All magic numbers and configuration limits in one place
 # Notion API Limits
 NOTION_TEXT_LIMIT = 2000  # Maximum characters per rich text item
 NOTION_BLOCK_CHUNK_SIZE = 80  # Maximum blocks per API call
+NOTION_API_BLOCK_LIMIT = 1000  # Notion API hard limit per request
 NOTION_API_RATE_LIMIT = 0.35  # Minimum seconds between API calls (~3 requests/sec)
+NOTION_TABLE_ROW_LIMIT = 100  # Maximum rows per table block
 
 # Image Verification
 DEFAULT_VERIFICATION_TIMEOUT = 60  # Default timeout for image verification (seconds)

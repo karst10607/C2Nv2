@@ -55,6 +55,18 @@ class ImportDatabase:
                 )
             ''')
             
+            # Page authors/editors table
+            self.conn.execute('''
+                CREATE TABLE IF NOT EXISTS page_authors (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER,
+                    page_id TEXT NOT NULL,
+                    author_name TEXT NOT NULL,
+                    role TEXT NOT NULL,  -- 'creator' or 'editor'
+                    FOREIGN KEY (run_id) REFERENCES import_runs(id)
+                )
+            ''')
+            
             # Create indexes for fast queries
             self.conn.execute('''
                 CREATE INDEX IF NOT EXISTS idx_failed_status 
@@ -64,6 +76,16 @@ class ImportDatabase:
             self.conn.execute('''
                 CREATE INDEX IF NOT EXISTS idx_page_id 
                 ON failed_pages(page_id)
+            ''')
+            
+            self.conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_author_name 
+                ON page_authors(author_name)
+            ''')
+            
+            self.conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_author_role 
+                ON page_authors(role)
             ''')
     
     def start_import_run(self, version: str, total_pages: int, total_images: int) -> int:
@@ -150,6 +172,66 @@ class ImportDatabase:
             ORDER BY timestamp DESC
             LIMIT ?
         ''', (limit,))
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def add_page_authors(self, run_id: int, page_id: str, created_by: Optional[str] = None, 
+                         last_modified_by: Optional[str] = None):
+        """Record author/editor information for a page"""
+        with self.conn:
+            if created_by:
+                self.conn.execute('''
+                    INSERT INTO page_authors (run_id, page_id, author_name, role)
+                    VALUES (?, ?, ?, 'creator')
+                ''', (run_id, page_id, created_by))
+            
+            if last_modified_by:
+                self.conn.execute('''
+                    INSERT INTO page_authors (run_id, page_id, author_name, role)
+                    VALUES (?, ?, ?, 'editor')
+                ''', (run_id, page_id, last_modified_by))
+    
+    def get_author_statistics(self) -> List[Dict[str, Any]]:
+        """
+        Get author statistics sorted by total count (most frequent first).
+        
+        Returns list of dicts with:
+        - author_name: Name of the author/editor
+        - total_count: Total number of pages they created/edited
+        - creator_count: Number of pages they created
+        - editor_count: Number of pages they edited
+        """
+        cursor = self.conn.execute('''
+            SELECT 
+                author_name,
+                COUNT(*) as total_count,
+                SUM(CASE WHEN role = 'creator' THEN 1 ELSE 0 END) as creator_count,
+                SUM(CASE WHEN role = 'editor' THEN 1 ELSE 0 END) as editor_count
+            FROM page_authors
+            GROUP BY author_name
+            ORDER BY total_count DESC, author_name ASC
+        ''')
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def get_author_statistics_by_role(self, role: str = 'creator') -> List[Dict[str, Any]]:
+        """
+        Get author statistics filtered by role (creator or editor).
+        
+        Args:
+            role: 'creator' or 'editor'
+        
+        Returns list of dicts sorted by count (most frequent first).
+        """
+        cursor = self.conn.execute('''
+            SELECT 
+                author_name,
+                COUNT(*) as count
+            FROM page_authors
+            WHERE role = ?
+            GROUP BY author_name
+            ORDER BY count DESC, author_name ASC
+        ''', (role,))
         
         return [dict(row) for row in cursor.fetchall()]
     

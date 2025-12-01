@@ -11,13 +11,34 @@ from .media_processor import (
     MediaHandler
 )
 
+from .converters import (
+    MediaConverter,
+    ConversionFormat,
+    ConversionResult,
+    ConversionError,
+    converter_registry
+)
+
+# Import to register converters
+from . import drawio_converter
+
+# Import scanner
+from .drawio_scanner import DrawioScanner, DrawioDiagram
+
 __all__ = [
     'MediaProcessor',
     'MediaType',
     'MediaItem',
     'ProcessedMedia',
     'MediaInventory',
-    'MediaHandler'
+    'MediaHandler',
+    'MediaConverter',
+    'ConversionFormat',
+    'ConversionResult',
+    'ConversionError',
+    'converter_registry',
+    'DrawioScanner',
+    'DrawioDiagram'
 ]
 
 

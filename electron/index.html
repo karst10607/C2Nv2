@@ -59,6 +59,14 @@
         </div>
 
         <div class="form-group">
+          <label for="skip-missing-media">
+            <input type="checkbox" id="skip-missing-media" checked>
+            Skip Missing Media Files
+          </label>
+          <small>Continue import even if some images/files are missing (e.g., placeholder images)</small>
+        </div>
+
+        <div class="form-group">
           <label for="upload-mode">🖼️ Image Upload Mode</label>
           <select id="upload-mode">
             <option value="s3">☁️ S3 Auto-Delete (Auto-cleanup after 1 day) ⭐ RECOMMENDED</option>
@@ -142,11 +150,20 @@
           <small>Concurrent API calls for faster verification</small>
         </div>
 
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="skip-verification">
+            🚀 Skip Image Verification
+          </label>
+          <small>Faster import by skipping image cache checks (saves ~8s per image)</small>
+        </div>
+
         <div class="button-group">
           <button id="save-btn" class="btn-primary">Save Configuration</button>
-          <button id="dry-run-btn" class="btn-secondary">Dry Run (Preview)</button>
+          <button id="statistics-btn" class="btn-secondary">📊 Show Statistics</button>
           <button id="import-btn" class="btn-primary">Start Import</button>
           <button id="retry-btn" class="btn-warning">🔄 Auto-Retry Failed</button>
+          <button id="cleanup-btn" class="btn-secondary">🗑️ Clean Old Failures</button>
           <button id="stop-btn" class="btn-danger" style="display:none;">Stop</button>
         </div>
       </section>
@@ -200,6 +217,19 @@
       <p>Config saved to: <code>~/.notion_importer/config.json</code></p>
       <p>Mapping output: <code>out/mapping.jsonl</code></p>
     </footer>
+  </div>
+
+  <!-- Statistics Modal -->
+  <div id="statistics-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>📊 HTML Statistics</h2>
+        <button class="modal-close" id="statistics-close">&times;</button>
+      </div>
+      <div class="modal-body" id="statistics-content">
+        <div class="statistics-loading">Loading statistics...</div>
+      </div>
+    </div>
   </div>
 
   <script src="renderer.js"></script>

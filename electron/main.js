@@ -138,7 +138,62 @@ ipcMain.handle('test-connection', async (event, token) => {
   });
 });
 
-ipcMain.handle('start-import', async (event, config, dryRun) => {
+ipcMain.handle('get-statistics', async (event, sourceDir) => {
+  return new Promise((resolve, reject) => {
+    const projectDir = path.join(__dirname, '..');
+    let cmd;
+    let args = [];
+    const env = { ...process.env };
+
+    if (app.isPackaged) {
+      // Use packaged Python
+      cmd = path.join(process.resourcesPath, 'python_dist', process.platform === 'win32' ? 'python.exe' : 'python');
+      args = ['-m', 'src.statistics', '--source-dir', sourceDir];
+      env.APP_RESOURCE_PATH = process.resourcesPath;
+    } else {
+      // Dev: python -m src.statistics
+      const venvPython = path.join(projectDir, '.venv', 'bin', 'python3');
+      cmd = fs.existsSync(venvPython) ? venvPython : 'python3';
+      args = ['-m', 'src.statistics', '--source-dir', sourceDir];
+      env.APP_RESOURCE_PATH = projectDir;
+    }
+
+    const statsProcess = spawn(cmd, args, { 
+      cwd: projectDir, 
+      env 
+    });
+
+    let output = '';
+    let errorOutput = '';
+
+    statsProcess.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    statsProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+
+    statsProcess.on('close', (code) => {
+      if (code === 0) {
+        try {
+          const stats = JSON.parse(output);
+          resolve({ success: true, stats });
+        } catch (err) {
+          resolve({ success: false, error: 'Failed to parse statistics', details: output });
+        }
+      } else {
+        resolve({ success: false, error: `Process exited with code ${code}`, details: errorOutput });
+      }
+    });
+
+    statsProcess.on('error', (err) => {
+      resolve({ success: false, error: err.message });
+    });
+  });
+});
+
+ipcMain.handle('start-import', async (event, config) => {
   return new Promise((resolve, reject) => {
     const projectDir = path.join(__dirname, '..');
     let cmd;
@@ -149,10 +204,11 @@ ipcMain.handle('start-import', async (event, config, dryRun) => {
     if (app.isPackaged) {
       // Use packaged run_import helper
       cmd = path.join(process.resourcesPath, 'python_dist', process.platform === 'win32' ? 'run_import.exe' : 'run_import');
-      if (dryRun) args.push('--dry-run'); else args.push('--run');
+      args.push('--run');
       if (config.SOURCE_DIR) { args.push('--source-dir', config.SOURCE_DIR); }
       if (config.PARENT_ID) { args.push('--parent-id', config.PARENT_ID); }
       if (config.MAX_COLUMNS) { args.push('--max-columns', String(config.MAX_COLUMNS)); }
+      if (config.SKIP_VERIFICATION) { args.push('--skip-verification'); }
       // Pass resource path for bundled tools
       env.APP_RESOURCE_PATH = process.resourcesPath;
       importProcess = spawn(cmd, args, { env });
@@ -161,10 +217,11 @@ ipcMain.handle('start-import', async (event, config, dryRun) => {
       const venvPython = path.join(projectDir, '.venv', 'bin', 'python3');
       const pythonCmd = fs.existsSync(venvPython) ? venvPython : 'python3';
       const pyArgs = ['-m', 'src.importer'];
-      if (dryRun) pyArgs.push('--dry-run'); else pyArgs.push('--run');
+      pyArgs.push('--run');
       if (config.SOURCE_DIR) { pyArgs.push('--source-dir', config.SOURCE_DIR); }
       if (config.PARENT_ID) { pyArgs.push('--parent-id', config.PARENT_ID); }
       if (config.MAX_COLUMNS) { pyArgs.push('--max-columns', String(config.MAX_COLUMNS)); }
+      if (config.SKIP_VERIFICATION) { pyArgs.push('--skip-verification'); }
       // Expose resource path so Python can find bundled tools during dev
       env.APP_RESOURCE_PATH = projectDir;
       importProcess = spawn(pythonCmd, pyArgs, { cwd: projectDir, env });
@@ -255,4 +312,47 @@ ipcMain.handle('stop-import', async () => {
     return { success: true };
   }
   return { success: false };
+});
+
+ipcMain.handle('cleanup-old-failures', async () => {
+  return new Promise((resolve) => {
+    const projectDir = path.join(__dirname, '..');
+    let cmd, args = [];
+    const env = { ...process.env };
+    
+    if (app.isPackaged) {
+      cmd = path.join(process.resourcesPath, 'python_dist', 'cleanup_old_failures');
+      env.APP_RESOURCE_PATH = process.resourcesPath;
+    } else {
+      const venvPython = path.join(projectDir, '.venv', 'bin', 'python3');
+      const pythonCmd = fs.existsSync(venvPython) ? venvPython : 'python3';
+      cmd = pythonCmd;
+      args = [path.join(projectDir, 'python_tools', 'cleanup_old_failures.py')];
+      env.APP_RESOURCE_PATH = projectDir;
+    }
+    
+    const cleanupProcess = spawn(cmd, args, { cwd: projectDir, env });
+    
+    let output = '';
+    
+    cleanupProcess.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+    
+    cleanupProcess.stderr.on('data', (data) => {
+      output += data.toString();
+    });
+    
+    cleanupProcess.on('close', (code) => {
+      if (code === 0) {
+        resolve({ success: true, output });
+      } else {
+        resolve({ success: false, error: `Process exited with code ${code}`, output });
+      }
+    });
+    
+    cleanupProcess.on('error', (err) => {
+      resolve({ success: false, error: err.message });
+    });
+  });
 });

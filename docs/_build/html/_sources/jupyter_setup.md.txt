@@ -1,0 +1,168 @@
+# Using Jupyter Notebooks with Sphinx
+
+This guide shows you how to write narrative documentation using Jupyter notebooks in your Sphinx documentation.
+
+## Setup
+
+### 1. Install Dependencies
+
+```bash
+pip install -r docs/requirements-jupyter.txt
+```
+
+### 2. Configuration
+
+The `docs/conf.py` is already configured with MyST-NB extension which supports:
+- **Jupyter notebooks** (`.ipynb` files)
+- **MyST Markdown notebooks** (`.md` files with code cells)
+- **Mixed content** (narrative + executable code)
+
+## Writing Options
+
+### Option 1: Classic Jupyter Notebooks
+
+1. **Start Jupyter Lab**:
+   ```bash
+   cd docs
+   jupyter lab
+   ```
+
+2. **Create notebooks** in `docs/tutorials/` or any folder
+
+3. **Features available**:
+   - Live code execution
+   - Rich outputs (plots, tables, etc.)
+   - Interactive widgets
+   - Markdown cells with MyST syntax
+
+### Option 2: MyST Markdown Files (Recommended)
+
+Write notebooks as Markdown files with executable code blocks:
+
+````markdown
+---
+kernelspec:
+  name: python3
+  display_name: Python 3
+---
+
+# My Tutorial
+
+This is a narrative section.
+
+```{code-cell} ipython3
+# This code will execute
+import pandas as pd
+df = pd.DataFrame({'A': [1, 2, 3], 'B': [4, 5, 6]})
+df
+```
+
+The output will be included in the documentation.
+````
+
+### Option 3: Jupytext (Best of Both)
+
+Use Jupytext to sync between `.ipynb` and `.md`:
+
+```bash
+pip install jupytext
+jupytext --set-formats ipynb,myst docs/tutorials/example.ipynb
+```
+
+Now you can:
+- Edit in Jupyter for interactivity
+- Edit in VS Code for better text editing
+- Both stay in sync!
+
+## Features
+
+### 1. Execute During Build
+
+```python
+# In conf.py
+nb_execution_mode = "cache"  # Options: "off", "auto", "cache", "force"
+```
+
+### 2. Hide Code/Output
+
+````markdown
+```{code-cell} ipython3
+:tags: [hide-input]
+
+# This code is hidden but output shows
+plot_something()
+```
+````
+
+### 3. Interactive Plots
+
+```{code-cell} ipython3
+import plotly.express as px
+fig = px.scatter(x=[1, 2, 3], y=[1, 4, 9])
+fig.show()
+```
+
+### 4. Admonitions in Notebooks
+
+```{code-cell} ipython3
+:tags: [hide-output]
+
+# Do something that might fail
+```
+
+```{note}
+This is a note about the code above
+```
+
+### 5. Cross-references
+
+Link to other pages: {doc}`/getting_started/installation`
+Link to API: {func}`src.html_parser.parse_html_file`
+
+## Example Notebook Structure
+
+```
+docs/
+├── tutorials/
+│   ├── basic_import.ipynb          # Classic notebook
+│   ├── advanced_features.md        # MyST markdown notebook
+│   ├── api_walkthrough.ipynb       # Code-heavy tutorial
+│   └── troubleshooting.md          # Text-heavy guide
+```
+
+## Best Practices
+
+1. **Use caching** to avoid re-running expensive computations
+2. **Tag cells** to control visibility
+3. **Clear outputs** before committing (optional)
+4. **Use relative imports** for your package
+5. **Add error handling** for robust docs
+
+## Building Documentation
+
+```bash
+# Build with notebook execution
+python setup_docs.py
+
+# Build without executing notebooks
+sphinx-build -b html -D nb_execution_mode=off docs docs/_build/html
+
+# Clean cache if needed
+rm -rf docs/.jupyter_cache
+```
+
+## VS Code Integration
+
+1. Install **Jupyter** extension
+2. Open `.ipynb` or `.md` files
+3. Run cells with `Shift+Enter`
+4. Preview with Sphinx using our tasks
+
+## Tips
+
+- **Performance**: Use `nb_execution_timeout = 600` for long-running cells
+- **Reproducibility**: Commit `.jupyter_cache/` for consistent builds
+- **CI/CD**: Set `nb_execution_mode = "off"` for faster builds
+- **Debugging**: Check `.jupyter_cache/` for execution errors
+
+Happy documenting! 📚✨

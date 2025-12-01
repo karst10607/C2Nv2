@@ -11,13 +11,18 @@ const sourceDirInput = document.getElementById('source-dir');
 const maxColumnsInput = document.getElementById('max-columns');
 const preserveLayoutCheckbox = document.getElementById('preserve-layout');
 const minColumnHeightInput = document.getElementById('min-column-height');
+const skipMissingMediaCheckbox = document.getElementById('skip-missing-media');
 const testConnectionBtn = document.getElementById('test-connection');
 const connectionStatus = document.getElementById('connection-status');
 const browseBtn = document.getElementById('browse-btn');
 const saveBtn = document.getElementById('save-btn');
-const dryRunBtn = document.getElementById('dry-run-btn');
+const statisticsBtn = document.getElementById('statistics-btn');
 const importBtn = document.getElementById('import-btn');
+const statisticsModal = document.getElementById('statistics-modal');
+const statisticsClose = document.getElementById('statistics-close');
+const statisticsContent = document.getElementById('statistics-content');
 const retryBtn = document.getElementById('retry-btn');
+const cleanupBtn = document.getElementById('cleanup-btn');
 const stopBtn = document.getElementById('stop-btn');
 const logOutput = document.getElementById('log-output');
 
@@ -90,6 +95,9 @@ uploadModeSelect.addEventListener('change', () => {
   maxColumnsInput.value = currentConfig.MAX_COLUMNS || 6;
   preserveLayoutCheckbox.checked = currentConfig.PRESERVE_LAYOUT !== false;
   minColumnHeightInput.value = currentConfig.MIN_COLUMN_HEIGHT || 3;
+  skipMissingMediaCheckbox.checked = currentConfig.SKIP_MISSING_MEDIA !== false;
+  document.getElementById('use-async').checked = currentConfig.USE_ASYNC !== false;
+  document.getElementById('skip-verification').checked = currentConfig.SKIP_VERIFICATION === true;
   
   // Load upload mode settings
   uploadModeSelect.value = currentConfig.UPLOAD_MODE || 's3';
@@ -167,8 +175,10 @@ saveBtn.addEventListener('click', async () => {
     MAX_COLUMNS: parseInt(maxColumnsInput.value) || 6,
     PRESERVE_LAYOUT: preserveLayoutCheckbox.checked,
     MIN_COLUMN_HEIGHT: parseInt(minColumnHeightInput.value) || 3,
+    SKIP_MISSING_MEDIA: skipMissingMediaCheckbox.checked,
     UPLOAD_MODE: uploadMode,
-    USE_ASYNC: document.getElementById('use-async').checked
+    USE_ASYNC: document.getElementById('use-async').checked,
+    SKIP_VERIFICATION: document.getElementById('skip-verification').checked
   };
   
   // Add mode-specific settings
@@ -203,9 +213,39 @@ saveBtn.addEventListener('click', async () => {
   }
 });
 
-// Dry run
-dryRunBtn.addEventListener('click', async () => {
-  await runImport(true);
+// Show statistics
+statisticsBtn.addEventListener('click', async () => {
+  const sourceDir = sourceDirInput.value.trim();
+  if (!sourceDir) {
+    alert('Please select a source directory first');
+    return;
+  }
+  
+  statisticsModal.style.display = 'block';
+  statisticsContent.innerHTML = '<div class="statistics-loading">Scanning HTML files...</div>';
+  
+  try {
+    const result = await electronAPI.getStatistics(sourceDir);
+    if (result.success) {
+      displayStatistics(result.stats);
+    } else {
+      statisticsContent.innerHTML = `<div class="statistics-loading" style="color: #e53e3e;">Error: ${result.error || 'Failed to get statistics'}</div>`;
+    }
+  } catch (error) {
+    statisticsContent.innerHTML = `<div class="statistics-loading" style="color: #e53e3e;">Error: ${error.message}</div>`;
+  }
+});
+
+// Close statistics modal
+statisticsClose.addEventListener('click', () => {
+  statisticsModal.style.display = 'none';
+});
+
+// Close modal when clicking outside
+statisticsModal.addEventListener('click', (e) => {
+  if (e.target === statisticsModal) {
+    statisticsModal.style.display = 'none';
+  }
 });
 
 // Start import
@@ -223,7 +263,7 @@ importBtn.addEventListener('click', async () => {
     if (!confirmed) return;
   }
 
-  await runImport(false);
+  await runImport();
 });
 
 // Retry failed images
@@ -236,12 +276,22 @@ retryBtn.addEventListener('click', async () => {
   await runRetry();
 });
 
+// Cleanup old failures
+cleanupBtn.addEventListener('click', async () => {
+  if (isImporting) return;
+  
+  const confirmed = confirm('This will remove old failed page records where the Notion pages no longer exist.\n\nThis helps clean up the retry list to focus on current failures. Continue?');
+  if (!confirmed) return;
+  
+  await runCleanup();
+});
+
 // Stop import
 stopBtn.addEventListener('click', async () => {
   await electronAPI.stopImport();
   stopBtn.style.display = 'none';
   importBtn.disabled = false;
-  dryRunBtn.disabled = false;
+  statisticsBtn.disabled = false;
   isImporting = false;
   
   // Stop progress timer
@@ -260,7 +310,7 @@ let processedFiles = 0;
 let progressTimer = null;
 
 // Run import
-async function runImport(dryRun) {
+async function runImport() {
   if (isImporting) return;
 
   const config = {
@@ -275,7 +325,7 @@ async function runImport(dryRun) {
   logOutput.textContent = '';
   isImporting = true;
   importBtn.disabled = true;
-  dryRunBtn.disabled = true;
+  statisticsBtn.disabled = true;
   stopBtn.style.display = 'inline-block';
   
   // Initialize progress tracking
@@ -288,13 +338,13 @@ async function runImport(dryRun) {
   // Start timer to update elapsed time
   progressTimer = setInterval(updateElapsedTime, 1000);
 
-  appendLog(`Starting ${dryRun ? 'dry run' : 'import'}...\n\n`);
+  appendLog('Starting import...\n\n');
 
-  const result = await electronAPI.startImport(config, dryRun);
+  const result = await electronAPI.startImport(config);
 
   stopBtn.style.display = 'none';
   importBtn.disabled = false;
-  dryRunBtn.disabled = false;
+  statisticsBtn.disabled = false;
   isImporting = false;
   
   // Stop progress timer
@@ -414,7 +464,7 @@ async function runRetry() {
   logOutput.textContent = '';
   isImporting = true;
   importBtn.disabled = true;
-  dryRunBtn.disabled = true;
+  statisticsBtn.disabled = true;
   retryBtn.disabled = true;
   
   appendLog('Starting retry of failed images...\n\n');
@@ -422,7 +472,7 @@ async function runRetry() {
   const result = await electronAPI.retryFailed();
   
   importBtn.disabled = false;
-  dryRunBtn.disabled = false;
+  statisticsBtn.disabled = false;
   retryBtn.disabled = false;
   isImporting = false;
   
@@ -431,6 +481,92 @@ async function runRetry() {
   } else {
     appendLog('\n✗ Retry failed: ' + (result.error || 'Unknown error') + '\n');
   }
+}
+
+// Run cleanup
+async function runCleanup() {
+  if (isImporting) return;
+  
+  logOutput.textContent = '';
+  isImporting = true;
+  importBtn.disabled = true;
+  statisticsBtn.disabled = true;
+  retryBtn.disabled = true;
+  cleanupBtn.disabled = true;
+  
+  appendLog('Cleaning up old failed page records...\n\n');
+  
+  const result = await electronAPI.cleanupOldFailures();
+  
+  importBtn.disabled = false;
+  statisticsBtn.disabled = false;
+  retryBtn.disabled = false;
+  cleanupBtn.disabled = false;
+  isImporting = false;
+  
+  if (result.success) {
+    appendLog(result.output);
+    appendLog('\n✓ Cleanup completed!\n');
+  } else {
+    appendLog('\n✗ Cleanup failed: ' + result.error + '\n');
+  }
+}
+
+// Display statistics in modal
+function displayStatistics(stats) {
+  let html = '<div class="statistics-section">';
+  html += '<h3>📁 Files</h3>';
+  html += `<div class="statistics-item"><span class="statistics-label">Total HTML files scanned</span><span class="statistics-value">${stats.total_files}</span></div>`;
+  html += '</div>';
+  
+  html += '<div class="statistics-section">';
+  html += '<h3>📊 Tables</h3>';
+  html += `<div class="statistics-item"><span class="statistics-label">Total tables</span><span class="statistics-value">${stats.tables.total}</span></div>`;
+  html += `<div class="statistics-item"><span class="statistics-label">Files with tables</span><span class="statistics-value">${stats.tables.files_with_tables}</span></div>`;
+  html += `<div class="statistics-item"><span class="statistics-label">Tables with merged cells</span><span class="statistics-value">${stats.tables.with_merged_cells}</span></div>`;
+  html += `<div class="statistics-item"><span class="statistics-label">Total merged cells</span><span class="statistics-value">${stats.tables.merged_cell_count}</span></div>`;
+  if (stats.tables.merged_cell_count > 0) {
+    html += `<div class="statistics-subitem">• Horizontal merges (colspan): ${stats.tables.colspan_count}</div>`;
+    html += `<div class="statistics-subitem">• Vertical merges (rowspan): ${stats.tables.rowspan_count}</div>`;
+  }
+  html += '</div>';
+  
+  html += '<div class="statistics-section">';
+  html += '<h3>📐 Side-by-Side Layouts</h3>';
+  html += `<div class="statistics-item"><span class="statistics-label">Total layouts</span><span class="statistics-value">${stats.layouts.total}</span></div>`;
+  html += `<div class="statistics-item"><span class="statistics-label">Files with layouts</span><span class="statistics-value">${stats.layouts.files_with_layouts}</span></div>`;
+  
+  if (Object.keys(stats.layouts.by_type).length > 0) {
+    html += '<div class="statistics-grid">';
+    for (const [layoutType, count] of Object.entries(stats.layouts.by_type)) {
+      html += `<div class="statistics-card">`;
+      html += `<div class="statistics-card-label">${layoutType}</div>`;
+      html += `<div class="statistics-card-value">${count}</div>`;
+      html += `</div>`;
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  
+  html += '<div class="statistics-section">';
+  html += '<h3>🎥 Videos</h3>';
+  html += `<div class="statistics-item"><span class="statistics-label">Total videos</span><span class="statistics-value">${stats.videos?.total || 0}</span></div>`;
+  html += `<div class="statistics-item"><span class="statistics-label">Files with videos</span><span class="statistics-value">${stats.videos?.files_with_videos || 0}</span></div>`;
+  html += '</div>';
+  
+  html += '<div class="statistics-section">';
+  html += '<h3>📊 Draw.io Diagrams</h3>';
+  html += `<div class="statistics-item"><span class="statistics-label">Total Draw.io diagrams</span><span class="statistics-value">${stats.drawio?.total || 0}</span></div>`;
+  html += `<div class="statistics-item"><span class="statistics-label">Files with Draw.io</span><span class="statistics-value">${stats.drawio?.files_with_drawio || 0}</span></div>`;
+  html += '</div>';
+  
+  html += '<div class="statistics-section">';
+  html += '<h3>🌿 PlantUML Diagrams</h3>';
+  html += `<div class="statistics-item"><span class="statistics-label">Total PlantUML diagrams</span><span class="statistics-value">${stats.plantuml?.total || 0}</span></div>`;
+  html += `<div class="statistics-item"><span class="statistics-label">Files with PlantUML</span><span class="statistics-value">${stats.plantuml?.files_with_plantuml || 0}</span></div>`;
+  html += '</div>';
+  
+  statisticsContent.innerHTML = html;
 }
 
 })(); // End of IIFE

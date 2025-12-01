@@ -4,15 +4,17 @@ Centralizes image-related logic to avoid duplication.
 """
 from typing import Optional
 from bs4 import Tag
+import logging
+from .models.errors import ErrorCode, get_error_message
 
 
-def should_skip_image(img_element: Tag, src: str) -> bool:
+def should_skip_image(img_element: Tag, src: str, allow_emoticons: bool = False) -> bool:
     """
     Determine if an image should be skipped during import.
     
     Filters out:
     - UI icons (JIRA, Confluence icons)
-    - Emoticons
+    - Emoticons (unless allow_emoticons=True)
     - Bullets and decorative elements
     - Confluence thumbnails
     - GIF animations (usually UI elements)
@@ -20,6 +22,7 @@ def should_skip_image(img_element: Tag, src: str) -> bool:
     Args:
         img_element: BeautifulSoup Tag element
         src: Image source URL
+        allow_emoticons: If True, allow emoticons as images (default: False, convert to emoji)
     
     Returns:
         True if image should be skipped, False if it should be imported
@@ -29,22 +32,50 @@ def should_skip_image(img_element: Tag, src: str) -> bool:
     if isinstance(img_class, list):
         img_class = ' '.join(img_class)
     
-    if any(x in str(img_class) for x in ['icon', 'emoticon', 'bullet']):
+    # Skip icons and bullets (but allow emoticons if requested)
+    skip_classes = ['icon', 'bullet']
+    if not allow_emoticons:
+        skip_classes.append('emoticon')
+    
+    if any(x in str(img_class) for x in skip_classes):
         return True
     
     # Check URL patterns
     skip_patterns = [
         '/universal_avatar/',  # JIRA/Confluence avatars
         '/icons/',             # UI icons
-        'emoticons/',          # Emoticon images
-        'attachments/thumbnails/'  # Confluence thumbnail endpoints
+        'attachments/thumbnails/',  # Confluence thumbnail endpoints
+        'placeholder/unknown-attachment',  # Placeholder for missing attachments
+        'unknown-attachment',  # Generic unknown attachment placeholder
+        '/plugins/servlet/confluence/placeholder/'  # Confluence placeholder images
     ]
     
-    if any(pattern in src for pattern in skip_patterns):
+    # Only skip emoticons from URL if not explicitly allowed
+    if not allow_emoticons:
+        skip_patterns.append('emoticons/')
+    
+    for pattern in skip_patterns:
+        if pattern in src:
+            if 'placeholder' in pattern or 'unknown-attachment' in pattern:
+                logging.debug(get_error_message(
+                    ErrorCode.WARN_PLACEHOLDER_IMAGE_SKIPPED,
+                    f"Skipping placeholder image: {src}"
+                ))
+            return True
+    
+    # Skip temporary files
+    if src.endswith('.tmp'):
+        logging.debug(get_error_message(
+            ErrorCode.WARN_TEMP_FILE_SKIPPED,
+            f"Skipping temporary file: {src}"
+        ))
         return True
     
     # Skip GIF files (usually UI animations)
+    # Exception: Allow GIFs if they're emoticons and allow_emoticons=True
     if src.endswith('.gif'):
+        if allow_emoticons and 'emoticon' in str(img_class).lower():
+            return False  # Allow emoticon GIFs
         return True
     
     return False
@@ -117,4 +148,62 @@ def normalize_image_url(src: str, base_url: str) -> str:
     base = base_url.rstrip('/')
     src = src.lstrip('/')
     return f"{base}/{src}"
+
+
+def is_table_icon(img_element: Tag, src: str) -> bool:
+    """
+    Check if image is likely a small icon/emoji suitable for tables.
+    
+    Icons are small images that can be rendered inline in Notion tables
+    as emojis or small decorative elements.
+    
+    Args:
+        img_element: BeautifulSoup Tag element
+        src: Image source URL
+        
+    Returns:
+        True if image is a small icon suitable for table cells
+    """
+    # Check explicit size attributes
+    width = img_element.get('width')
+    height = img_element.get('height')
+    
+    if width and height:
+        try:
+            w = int(str(width).replace('px', ''))
+            h = int(str(height).replace('px', ''))
+            # Icons are typically 32x32 or smaller
+            if w <= 32 and h <= 32:
+                return True
+        except (ValueError, TypeError):
+            pass
+    
+    # Check common icon URL patterns
+    icon_patterns = [
+        'icon', 'emoji', 'emoticon', 
+        '/16x16/', '/24x24/', '/32x32/', '/48x48/',
+        '/small/', '/tiny/', '/mini/'
+    ]
+    
+    src_lower = src.lower()
+    if any(pattern in src_lower for pattern in icon_patterns):
+        return True
+    
+    # Check filename patterns
+    filename = src.split('/')[-1].lower()
+    
+    # Small GIFs are often icons
+    if filename.endswith('.gif') and len(filename) < 20:
+        return True
+    
+    # Common icon file patterns
+    if filename.endswith('.ico'):
+        return True
+    
+    # Check for status/priority icons
+    status_patterns = ['status', 'priority', 'flag', 'check', 'cross', 'tick']
+    if any(pattern in filename for pattern in status_patterns):
+        return True
+    
+    return False
 

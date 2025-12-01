@@ -48,6 +48,17 @@ class BaseConfig:
     min_column_height: int = MIN_COLUMN_HEIGHT
     preserve_table_layout: bool = True
     
+    # Smart table rendering options
+    smart_table_rendering: bool = True
+    table_image_threshold: int = 2  # Max images before switching to columns
+    prefer_native_tables: bool = True
+    icon_size_threshold: int = 32  # Pixels, to identify emoji-like images
+    
+    # Media handling options
+    skip_missing_media: bool = True  # Continue import even if media files are missing
+    fail_on_missing_media_threshold: int = 50  # Fail if more than this many media files are missing
+    skip_verification: bool = False  # Skip image verification after upload
+    
     def validate(self) -> None:
         """Validate base configuration"""
         if not self.source_dir:
@@ -245,22 +256,50 @@ class ImportConfig:
     @classmethod
     def from_app_config(cls, app_config: Any) -> 'ImportConfig':
         """Create ImportConfig from legacy AppConfig"""
-        import_config = cls()
+        from .errors import ConfigurationError, ErrorCode
         
-        # Base config
-        import_config.base.notion_token = app_config.notion_token
-        import_config.base.parent_id = app_config.parent_id
-        import_config.base.source_dir = app_config.source_dir
-        
-        # Strategy config from dynamic attributes
-        strategy_dict = {}
-        for attr in dir(app_config):
-            if not attr.startswith('_'):
-                value = getattr(app_config, attr)
-                if attr in ['upload_mode', 'tunnel_keepalive_sec'] or \
-                   attr.startswith('s3_') or attr.startswith('cf_'):
-                    strategy_dict[attr] = value
-        
-        import_config.strategy = StrategyConfig.from_dict(strategy_dict)
-        
-        return import_config
+        try:
+            import_config = cls()
+            
+            # Base config
+            import_config.base.notion_token = app_config.notion_token
+            import_config.base.parent_id = app_config.parent_id
+            import_config.base.source_dir = app_config.source_dir
+            
+            # Check for skip_verification in _extra_attrs
+            if hasattr(app_config, '_extra_attrs') and app_config._extra_attrs:
+                if 'skip_verification' in app_config._extra_attrs:
+                    import_config.base.skip_verification = bool(app_config._extra_attrs['skip_verification'])
+                elif 'SKIP_VERIFICATION' in app_config._extra_attrs:
+                    import_config.base.skip_verification = bool(app_config._extra_attrs['SKIP_VERIFICATION'])
+            
+            # Strategy config from dynamic attributes
+            strategy_dict = {}
+            
+            # First check standard attributes
+            for attr in dir(app_config):
+                if not attr.startswith('_'):
+                    try:
+                        value = getattr(app_config, attr)
+                        if attr in ['upload_mode', 'tunnel_keepalive_sec'] or \
+                           attr.startswith('s3_') or attr.startswith('cf_'):
+                            strategy_dict[attr] = value
+                    except AttributeError:
+                        pass
+            
+            # IMPORTANT: Also check _extra_attrs where dynamic config values are stored
+            if hasattr(app_config, '_extra_attrs') and app_config._extra_attrs:
+                for key, value in app_config._extra_attrs.items():
+                    if key in ['upload_mode', 'tunnel_keepalive_sec'] or \
+                       key.startswith('s3_') or key.startswith('cf_'):
+                        strategy_dict[key] = value
+            
+            import_config.strategy = StrategyConfig.from_dict(strategy_dict)
+            
+            return import_config
+        except Exception as e:
+            raise ConfigurationError(
+                ErrorCode.CONFIG_PARSE_ERROR,
+                f"Failed to parse configuration: {str(e)}",
+                "Check your config file for missing or invalid values"
+            )

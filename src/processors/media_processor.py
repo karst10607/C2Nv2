@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 from ..constants import MAX_COLUMNS_PER_ROW
 from ..models import ErrorCode, NotionImporterError
+from .converters import converter_registry, ConversionFormat, ConversionResult
 
 
 class MediaType(Enum):
@@ -406,3 +407,21 @@ class MediaProcessor:
             MediaType.UNKNOWN: 'file'
         }
         return mapping.get(media_type, 'file')
+    
+    def check_and_convert(self, media_item: MediaItem, output_dir: Optional[Path] = None) -> ConversionResult:
+        """
+        Check if media item needs conversion and convert if necessary.
+        
+        For Phase 3.2, this focuses on Draw.io diagrams.
+        Future phases will add more converters.
+        """
+        # Check if any converter can handle this file
+        target_format = ConversionFormat.PNG  # Default target for diagrams/non-web formats
+        
+        converter = converter_registry.get_converter(media_item.source_path, target_format)
+        if converter:
+            result = converter.convert(media_item.source_path, target_format, output_dir)
+            return result
+        
+        # No conversion needed or possible
+        return ConversionResult(success=True, output_path=media_item.source_path)

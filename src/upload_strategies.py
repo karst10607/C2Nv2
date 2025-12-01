@@ -67,14 +67,66 @@ class UploadStrategy(ABC):
     def _get_content_type(self, path: Path) -> str:
         """Get MIME type from file extension"""
         types = {
+            # Images
             '.png': 'image/png',
             '.jpg': 'image/jpeg',
             '.jpeg': 'image/jpeg',
             '.gif': 'image/gif',
             '.webp': 'image/webp',
-            '.svg': 'image/svg+xml'
+            '.svg': 'image/svg+xml',
+            '.bmp': 'image/bmp',
+            '.ico': 'image/x-icon',
+            
+            # Videos
+            '.mp4': 'video/mp4',
+            '.mov': 'video/quicktime',
+            '.avi': 'video/x-msvideo',
+            '.webm': 'video/webm',
+            '.mkv': 'video/x-matroska',
+            
+            # Documents
+            '.pdf': 'application/pdf',
+            '.doc': 'application/msword',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.xls': 'application/vnd.ms-excel',
+            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            '.ppt': 'application/vnd.ms-powerpoint',
+            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            '.odt': 'application/vnd.oasis.opendocument.text',
+            '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
+            '.odp': 'application/vnd.oasis.opendocument.presentation',
+            
+            # Text files
+            '.txt': 'text/plain',
+            '.csv': 'text/csv',
+            '.json': 'application/json',
+            '.xml': 'application/xml',
+            '.html': 'text/html',
+            '.css': 'text/css',
+            '.js': 'application/javascript',
+            '.md': 'text/markdown',
+            
+            # Archives
+            '.zip': 'application/zip',
+            '.rar': 'application/x-rar-compressed',
+            '.7z': 'application/x-7z-compressed',
+            '.tar': 'application/x-tar',
+            '.gz': 'application/gzip',
+            
+            # Draw.io
+            '.drawio': 'application/xml',
+            
+            # Other
+            '.rtf': 'application/rtf',
+            '.epub': 'application/epub+zip',
         }
-        return types.get(path.suffix.lower(), 'application/octet-stream')
+        mime_type = types.get(path.suffix.lower(), 'application/octet-stream')
+        
+        # Log file types that are being uploaded
+        if path.suffix.lower() not in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']:
+            print(f"  [dim]Uploading {path.suffix} file with MIME type: {mime_type}[/dim]")
+            
+        return mime_type
 
 
 class TunnelStrategy(UploadStrategy):
@@ -163,15 +215,62 @@ class S3TempStrategy(UploadStrategy):
     
     def prepare(self, source_dir: Path) -> str:
         import boto3
+        from botocore.config import Config
+        from botocore.exceptions import ClientError
+        from src.models.errors import UploadError, ErrorCode
+        
+        # Explicitly use signature v4 and set appropriate timeouts
+        config = Config(
+            signature_version='s3v4',
+            retries={'max_attempts': 3, 'mode': 'standard'}
+        )
         
         self.client = boto3.client('s3',
             region_name=self.region,
             aws_access_key_id=self.access_key,
-            aws_secret_access_key=self.secret_key
+            aws_secret_access_key=self.secret_key,
+            config=config
         )
+        
+        # Verify bucket exists and check region
+        try:
+            response = self.client.get_bucket_location(Bucket=self.bucket)
+            bucket_region = response.get('LocationConstraint')
+            # AWS returns None for us-east-1
+            if bucket_region is None:
+                bucket_region = 'us-east-1'
+            if bucket_region != self.region:
+                raise UploadError(
+                    ErrorCode.CONFIG_S3_REGION_MISMATCH,
+                    f"Bucket '{self.bucket}' is in region '{bucket_region}' but config specifies '{self.region}'",
+                    "Update your S3 region in settings to match the bucket location"
+                )
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchBucket':
+                raise UploadError(
+                    ErrorCode.CONFIG_MISSING_S3,
+                    f"S3 bucket '{self.bucket}' not found",
+                    "Check bucket name and ensure you have access"
+                )
+            raise
+        
+        # Test if public access works for notion-temp prefix
+        import requests
+        test_url = f"https://{self.bucket}.s3.{self.region}.amazonaws.com/notion-temp/test.txt"
+        try:
+            # Just check if we get 403 vs 404 (403 = no public access, 404 = public access ok)
+            resp = requests.head(test_url, timeout=2)
+            if resp.status_code == 403:
+                print(f"[yellow]⚠️  Warning: S3 bucket may not have public read access for notion-temp/*[/yellow]")
+                print(f"[yellow]   Notion might show 'Invalid image url' errors[/yellow]")
+                print(f"[yellow]   To fix: Add bucket policy allowing public read for notion-temp/* prefix[/yellow]")
+        except:
+            # Network error or timeout, skip the check
+            pass
         
         print(f"[green]Using S3 Auto-Delete: {self.bucket} ({self.region})[/green]")
         print(f"[green]  Files will auto-delete after {self.lifecycle_days} day(s)[/green]")
+        print(f"[dim]  Using signature version: s3v4[/dim]")
         return ""
     
     def upload_image(self, local_path: Path, context: Dict) -> str:
@@ -194,9 +293,13 @@ class S3TempStrategy(UploadStrategy):
         
         self.uploaded_count += 1
         
-        # Generate URL (presigned for security, or public)
-        if self.use_presigned:
-            # Presigned URL expires in 1 hour (Notion downloads within minutes)
+        # Generate URL
+        # For notion-temp prefix, always use public URL (bucket policy allows public read)
+        # This avoids issues with Notion's HEAD request validation
+        if key.startswith('notion-temp/'):
+            url = f'https://{self.bucket}.s3.{self.region}.amazonaws.com/{key}'
+        elif self.use_presigned:
+            # Presigned URL for other prefixes
             url = self.client.generate_presigned_url(
                 'get_object',
                 Params={'Bucket': self.bucket, 'Key': key},

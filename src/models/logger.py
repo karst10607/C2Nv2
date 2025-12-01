@@ -76,3 +76,6 @@ def log_success(message: str) -> None:
 
 def log_dim(message: str) -> None:
     Logger.dim(message)
+
+# Default logger instance
+logger = Logger()
