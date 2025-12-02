@@ -30,6 +30,8 @@ bundled_tools/cloudflared-*
 
 # Test/sample HTML exports (too large for repo)
 EP/
+IDP/
+LOGISTICS*/
 
 # Config files with sensitive data
 .env
