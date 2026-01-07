@@ -7,13 +7,14 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>Notion Importer</h1>
-      <p class="subtitle">Import Confluence HTML exports into Notion</p>
-    </header>
+  <div class="app-layout">
+    <div class="container">
+      <header>
+        <h1>Notion Importer</h1>
+        <p class="subtitle">Import Confluence HTML exports into Notion</p>
+      </header>
 
-    <main>
+      <main>
       <section class="config-section">
         <h2>Configuration</h2>
         
@@ -217,6 +218,59 @@
       <p>Config saved to: <code>~/.notion_importer/config.json</code></p>
       <p>Mapping output: <code>out/mapping.jsonl</code></p>
     </footer>
+  </div>
+
+  <!-- Error Panel (Right Side) -->
+  <div class="error-panel" id="error-panel">
+    <div class="error-panel-header">
+      <h3>🔍 Error Log</h3>
+      <button class="panel-toggle" id="panel-toggle" title="Toggle Panel">◀</button>
+    </div>
+    
+    <div class="error-panel-content" id="error-panel-content">
+      <!-- Filter Controls -->
+      <div class="error-filters">
+        <select id="error-run-filter">
+          <option value="all">All Runs</option>
+          <option value="latest">Latest Run</option>
+        </select>
+        <select id="error-stage-filter">
+          <option value="all">All Stages</option>
+          <option value="parsing">Parsing</option>
+          <option value="transform">Transform</option>
+          <option value="notion_upload">Upload</option>
+        </select>
+        <button id="refresh-errors" class="btn-icon" title="Refresh">🔄</button>
+      </div>
+      
+      <!-- Error Summary -->
+      <div class="error-summary" id="error-summary">
+        <div class="summary-stat">
+          <span class="stat-value" id="total-errors">0</span>
+          <span class="stat-label">Total Errors</span>
+        </div>
+        <div class="summary-stat">
+          <span class="stat-value" id="parsing-errors">0</span>
+          <span class="stat-label">Parsing</span>
+        </div>
+        <div class="summary-stat">
+          <span class="stat-value" id="upload-errors">0</span>
+          <span class="stat-label">Upload</span>
+        </div>
+      </div>
+      
+      <!-- Error List -->
+      <div class="error-list" id="error-list">
+        <div class="error-empty">No errors recorded yet.</div>
+      </div>
+      
+      <!-- Error Detail (shown when clicking an error) -->
+      <div class="error-detail" id="error-detail" style="display:none;">
+        <button class="back-btn" id="error-back">← Back to list</button>
+        <div class="detail-content" id="detail-content"></div>
+      </div>
+    </div>
+  </div>
   </div>
 
   <!-- Statistics Modal -->

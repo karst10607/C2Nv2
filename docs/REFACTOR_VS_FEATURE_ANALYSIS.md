@@ -298,3 +298,5 @@ If you need macros urgently:
 
 **Recommendation**: Refactor `html_parser.py` now, then add macro detection to the clean architecture.
 
+
+

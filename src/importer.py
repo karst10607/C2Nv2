@@ -1,6 +1,7 @@
 import argparse
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from rich import print
@@ -261,46 +262,61 @@ def main(argv: Optional[list] = None):
     total_blocks = 0
     total_images = 0
     page_stats = []
+    parsing_failures = []  # Track files that failed to parse/transform
     import_start_time = time.time()
     
     for f in html_files:
-        ast = parse_html_file(f)
-        
-        # For S3/CDN strategies, upload images now and get URLs
-        # For tunnel, public URL is already set
-        if public:
-            # Tunnel strategy - use base URL
-            image_base_url = public
-        else:
-            # S3/CDN strategy - will upload per-image
-            image_base_url = ""  # Will be replaced during transform
-        
-        blocks = to_notion_blocks(
-            ast, 
-            image_base_url=image_base_url, 
-            max_cols=import_config.base.max_columns,
-            preserve_table_layout=import_config.base.preserve_table_layout,
-            min_column_height=import_config.base.min_column_height,
-            smart_table_rendering=import_config.base.smart_table_rendering,
-            table_image_threshold=import_config.base.table_image_threshold
-        )
-        
-        # For S3/CDN strategies, upload media and update URLs in blocks
-        if not public:
-            blocks = upload_media_in_blocks(blocks, upload_strategy, Path(source_dir), {})
-        
-        image_count = count_images_in_blocks(blocks)
-        total_blocks += len(blocks)
-        total_images += image_count
-        
-        page_stats.append({
-            'file': f,
-            'title': ast['title'],
-            'ast': ast,
-            'blocks': blocks,
-            'image_count': image_count,
-            'metadata': ast.get('metadata', {})
-        })
+        try:
+            ast = parse_html_file(f)
+            
+            # For S3/CDN strategies, upload images now and get URLs
+            # For tunnel, public URL is already set
+            if public:
+                # Tunnel strategy - use base URL
+                image_base_url = public
+            else:
+                # S3/CDN strategy - will upload per-image
+                image_base_url = ""  # Will be replaced during transform
+            
+            blocks = to_notion_blocks(
+                ast, 
+                image_base_url=image_base_url, 
+                max_cols=import_config.base.max_columns,
+                preserve_table_layout=import_config.base.preserve_table_layout,
+                min_column_height=import_config.base.min_column_height,
+                smart_table_rendering=import_config.base.smart_table_rendering,
+                table_image_threshold=import_config.base.table_image_threshold
+            )
+            
+            # For S3/CDN strategies, upload media and update URLs in blocks
+            if not public:
+                blocks = upload_media_in_blocks(blocks, upload_strategy, Path(source_dir), {})
+            
+            image_count = count_images_in_blocks(blocks)
+            total_blocks += len(blocks)
+            total_images += image_count
+            
+            page_stats.append({
+                'file': f,
+                'title': ast['title'],
+                'ast': ast,
+                'blocks': blocks,
+                'image_count': image_count,
+                'metadata': ast.get('metadata', {})
+            })
+        except Exception as e:
+            # Capture error details for later review
+            error_detail = {
+                'file': str(f),
+                'filename': f.name,
+                'stage': 'parsing',
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'traceback': traceback.format_exc()
+            }
+            parsing_failures.append(error_detail)
+            print(f"[red]✗ Failed to parse {f.name}: {type(e).__name__}: {e}[/red]")
+            continue  # Move to next file instead of crashing
     
     # Show summary before importing
     print(f"\n[green]═══ Import Summary ═══[/green]")
@@ -333,70 +349,124 @@ def main(argv: Optional[list] = None):
         print(f"- {f.name} -> {title} ({len(blocks)} blocks, {image_count} images)")
         
         if notion:
-            page_id = notion.create_page(parent_id, title)
-            notion.append_blocks(page_id, blocks)
-            
-            # Save author/editor information to database
-            if run_id and metadata:
-                db.add_page_authors(
-                    run_id=run_id,
-                    page_id=page_id,
-                    created_by=metadata.get('created_by'),
-                    last_modified_by=metadata.get('last_modified_by')
-                )
-            
-            # Verify images are loaded before moving to next page
-            images_ok = True
-            actual_verified = 0
-            if image_count > 0 and not (import_config.base.skip_verification or args.skip_verification):
-                # Give Notion's backend a head start before polling
-                print(f"  [dim]Waiting {INITIAL_IMAGE_WAIT}s for Notion to start fetching images...[/dim]")
-                time.sleep(INITIAL_IMAGE_WAIT)
+            page_id = None  # Track for error handling
+            try:
+                page_id = notion.create_page(parent_id, title)
+                notion.append_blocks(page_id, blocks)
                 
-                # Timeout scales with image count: 10s base + 8s per image
-                timeout = max(MIN_IMAGE_TIMEOUT, min(MAX_IMAGE_TIMEOUT, IMAGE_TIMEOUT_BASE + image_count * IMAGE_TIMEOUT_PER_IMAGE))
-                
-                # Verify using ImageVerifier
-                images_ok, actual_verified = verifier.verify_page_images(
-                    page_id, image_count, timeout=timeout
-                )
-                
-                # Record failures in database
-                if not images_ok:
-                    db.add_failed_page(
+                # Save author/editor information to database
+                if run_id and metadata:
+                    db.add_page_authors(
                         run_id=run_id,
-                        file_path=str(f),
                         page_id=page_id,
-                        title=title,
-                        expected_images=image_count,
-                        verified_images=actual_verified,
-                        error=f'Verification timeout after {timeout}s'
+                        created_by=metadata.get('created_by'),
+                        last_modified_by=metadata.get('last_modified_by')
+                    )
+                
+                # Verify images are loaded before moving to next page
+                images_ok = True
+                actual_verified = 0
+                if image_count > 0 and not (import_config.base.skip_verification or args.skip_verification):
+                    # Give Notion's backend a head start before polling
+                    print(f"  [dim]Waiting {INITIAL_IMAGE_WAIT}s for Notion to start fetching images...[/dim]")
+                    time.sleep(INITIAL_IMAGE_WAIT)
+                    
+                    # Timeout scales with image count: 10s base + 8s per image
+                    timeout = max(MIN_IMAGE_TIMEOUT, min(MAX_IMAGE_TIMEOUT, IMAGE_TIMEOUT_BASE + image_count * IMAGE_TIMEOUT_PER_IMAGE))
+                    
+                    # Verify using ImageVerifier
+                    images_ok, actual_verified = verifier.verify_page_images(
+                        page_id, image_count, timeout=timeout
                     )
                     
-                    failed_pages.append({
-                        'file': str(f),
-                        'page_id': page_id,
-                        'title': title,
-                        'expected_images': image_count
-                    })
-                else:
+                    # Record failures in database
+                    if not images_ok:
+                        db.add_failed_page(
+                            run_id=run_id,
+                            file_path=str(f),
+                            page_id=page_id,
+                            title=title,
+                            expected_images=image_count,
+                            verified_images=actual_verified,
+                            error=f'Verification timeout after {timeout}s'
+                        )
+                        
+                        failed_pages.append({
+                            'file': str(f),
+                            'page_id': page_id,
+                            'title': title,
+                            'expected_images': image_count
+                        })
+                    else:
+                        actual_verified = image_count
+                        verified_image_count += image_count
+                elif image_count > 0 and (import_config.base.skip_verification or args.skip_verification):
+                    # Skip verification - mark all images as verified
+                    print(f"  [dim]Skipping verification for {image_count} images[/dim]")
                     actual_verified = image_count
                     verified_image_count += image_count
-            elif image_count > 0 and (import_config.base.skip_verification or args.skip_verification):
-                # Skip verification - mark all images as verified
-                print(f"  [dim]Skipping verification for {image_count} images[/dim]")
-                actual_verified = image_count
-                verified_image_count += image_count
-                images_ok = True
-            
-            line = f"{{\"source\":\"{str(f)}\",\"page_id\":\"{page_id}\"}}\n"
-            with open(mapping_path, 'a', encoding='utf-8') as fp:
-                fp.write(line)
+                    images_ok = True
+                
+                line = f"{{\"source\":\"{str(f)}\",\"page_id\":\"{page_id}\"}}\n"
+                with open(mapping_path, 'a', encoding='utf-8') as fp:
+                    fp.write(line)
+            except Exception as e:
+                # Capture Notion API error details
+                error_detail = {
+                    'file': str(f),
+                    'filename': f.name,
+                    'stage': 'notion_upload',
+                    'error_type': type(e).__name__,
+                    'error_message': str(e),
+                    'traceback': traceback.format_exc(),
+                    'page_id': page_id  # May be None if create_page failed
+                }
+                parsing_failures.append(error_detail)
+                print(f"[red]✗ Failed to upload {title}: {type(e).__name__}: {e}[/red]")
+                continue  # Move to next page instead of crashing
 
+    # Save parsing errors to database
+    for err in parsing_failures:
+        db.add_parsing_error(
+            run_id=run_id,
+            file_path=err['file'],
+            filename=err['filename'],
+            stage=err['stage'],
+            error_type=err['error_type'],
+            error_message=err['error_message'],
+            traceback_str=err.get('traceback')
+        )
+    
     # Finalize database run
     duration = int(time.time() - import_start_time)
-    successful_pages = len(html_files) - len(failed_pages)
+    # Subtract both failed pages (image verification) and parsing failures
+    successful_pages = len(page_stats) - len(failed_pages)  # page_stats excludes parsing failures
     db.finish_import_run(run_id, successful_pages, verified_image_count, duration)
+    
+    # Export parsing errors to JSON (with run_id in filename for history)
+    if parsing_failures:
+        # Use run-specific filename so each import's errors are preserved
+        parsing_errors_path = Path(__file__).resolve().parents[1] / 'out' / f'parsing_errors_run{run_id}.json'
+        db.export_parsing_errors_to_json(parsing_errors_path, run_id)
+        
+        # Also save a "latest" copy for convenience
+        latest_errors_path = Path(__file__).resolve().parents[1] / 'out' / 'parsing_errors_latest.json'
+        db.export_parsing_errors_to_json(latest_errors_path, run_id)
+        
+        print(f"\n[red]═══ Parsing/Conversion Errors ═══[/red]")
+        print(f"[red]{len(parsing_failures)} file(s) failed to process:[/red]")
+        
+        for err in parsing_failures[:MAX_FAILED_PAGES_DISPLAY]:
+            print(f"  [red]✗ {err['filename']}[/red]")
+            print(f"    Stage: {err['stage']}")
+            print(f"    Error: {err['error_type']}: {err['error_message'][:100]}")
+        if len(parsing_failures) > MAX_FAILED_PAGES_DISPLAY:
+            print(f"  [red]... and {len(parsing_failures) - MAX_FAILED_PAGES_DISPLAY} more[/red]")
+        
+        print(f"\n[yellow]Detailed errors saved to:[/yellow]")
+        print(f"[yellow]  - {parsing_errors_path} (this run)[/yellow]")
+        print(f"[yellow]  - {latest_errors_path} (latest)[/yellow]")
+        print(f"[yellow]Database: {db.db_path} (all runs, query by run_id={run_id})[/yellow]")
     
     # Export failed pages to JSON for compatibility
     if failed_pages:
@@ -418,13 +488,16 @@ def main(argv: Optional[list] = None):
     # Final summary
     if notion:
         total_pages = len(html_files)
-        success_pages = total_pages - len(failed_pages)
+        parsed_pages = len(page_stats)  # Successfully parsed pages
+        success_pages = parsed_pages - len(failed_pages)
         failed_image_count = sum(p['expected_images'] for p in failed_pages)
         
         print(f"\n[green]{'═' * 40}[/green]")
         print(f"[green]✓ Import Complete[/green]")
         print(f"  Pages:  {success_pages}/{total_pages} successful")
         print(f"  Images: {verified_image_count}/{total_images} verified")
+        if parsing_failures:
+            print(f"[red]  {len(parsing_failures)} page(s) failed to parse/convert[/red]")
         if failed_pages:
             print(f"[yellow]  {len(failed_pages)} page(s) with {failed_image_count} unverified images[/yellow]")
             print(f"[cyan]  Run 'Auto-Retry Failed' in GUI to retry failed pages[/cyan]")

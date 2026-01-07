@@ -10,5 +10,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   retryFailed: () => ipcRenderer.invoke('retry-failed'),
   cleanupOldFailures: () => ipcRenderer.invoke('cleanup-old-failures'),
   stopImport: () => ipcRenderer.invoke('stop-import'),
-  onImportLog: (callback) => ipcRenderer.on('import-log', (event, data) => callback(data))
+  onImportLog: (callback) => ipcRenderer.on('import-log', (event, data) => callback(data)),
+  getParsingErrors: (options) => ipcRenderer.invoke('get-parsing-errors', options)
 });

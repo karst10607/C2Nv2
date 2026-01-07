@@ -145,3 +145,5 @@ Modal displays formatted statistics
 
 The modal provides a clean, professional way to view statistics without cluttering the main interface.
 
+
+

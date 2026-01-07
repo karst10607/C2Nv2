@@ -87,6 +87,27 @@ class ImportDatabase:
                 CREATE INDEX IF NOT EXISTS idx_author_role 
                 ON page_authors(role)
             ''')
+            
+            # Parsing/conversion errors table - tracks files that failed to parse or transform
+            self.conn.execute('''
+                CREATE TABLE IF NOT EXISTS parsing_errors (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER,
+                    file_path TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    stage TEXT NOT NULL,
+                    error_type TEXT NOT NULL,
+                    error_message TEXT NOT NULL,
+                    traceback TEXT,
+                    timestamp TEXT NOT NULL,
+                    FOREIGN KEY (run_id) REFERENCES import_runs(id)
+                )
+            ''')
+            
+            self.conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_parsing_errors_run 
+                ON parsing_errors(run_id)
+            ''')
     
     def start_import_run(self, version: str, total_pages: int, total_images: int) -> int:
         """Record the start of an import run, return run_id"""
@@ -248,6 +269,200 @@ class ImportDatabase:
         
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(failed_pages, f, indent=2, ensure_ascii=False)
+    
+    def add_parsing_error(self, run_id: int, file_path: str, filename: str, 
+                          stage: str, error_type: str, error_message: str, 
+                          traceback_str: Optional[str] = None):
+        """
+        Record a parsing/conversion error for a file.
+        
+        Args:
+            run_id: The import run ID
+            file_path: Full path to the file that failed
+            filename: Just the filename for display
+            stage: Where it failed - 'parsing', 'transform', or 'notion_upload'
+            error_type: The exception class name (e.g., 'AttributeError')
+            error_message: The error message string
+            traceback_str: Full traceback for debugging (optional)
+        """
+        with self.conn:
+            self.conn.execute('''
+                INSERT INTO parsing_errors 
+                (run_id, file_path, filename, stage, error_type, error_message, traceback, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (run_id, file_path, filename, stage, error_type, error_message, 
+                  traceback_str, datetime.now().isoformat()))
+    
+    def get_parsing_errors(self, run_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Get parsing errors, optionally filtered by run_id.
+        
+        Args:
+            run_id: Optional run ID to filter by. If None, returns all errors.
+            
+        Returns:
+            List of error records as dicts
+        """
+        if run_id is not None:
+            cursor = self.conn.execute('''
+                SELECT * FROM parsing_errors 
+                WHERE run_id = ? 
+                ORDER BY timestamp
+            ''', (run_id,))
+        else:
+            cursor = self.conn.execute('''
+                SELECT * FROM parsing_errors 
+                ORDER BY timestamp DESC
+            ''')
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def get_parsing_errors_summary(self, run_id: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get summary of parsing errors by stage.
+        
+        Returns dict with counts by stage and total.
+        """
+        if run_id is not None:
+            cursor = self.conn.execute('''
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN stage = 'parsing' THEN 1 ELSE 0 END) as parsing_count,
+                    SUM(CASE WHEN stage = 'transform' THEN 1 ELSE 0 END) as transform_count,
+                    SUM(CASE WHEN stage = 'notion_upload' THEN 1 ELSE 0 END) as upload_count
+                FROM parsing_errors
+                WHERE run_id = ?
+            ''', (run_id,))
+        else:
+            cursor = self.conn.execute('''
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN stage = 'parsing' THEN 1 ELSE 0 END) as parsing_count,
+                    SUM(CASE WHEN stage = 'transform' THEN 1 ELSE 0 END) as transform_count,
+                    SUM(CASE WHEN stage = 'notion_upload' THEN 1 ELSE 0 END) as upload_count
+                FROM parsing_errors
+            ''')
+        
+        row = cursor.fetchone()
+        return dict(row) if row else {'total': 0, 'parsing_count': 0, 'transform_count': 0, 'upload_count': 0}
+    
+    def export_parsing_errors_to_json(self, output_path: Path, run_id: Optional[int] = None):
+        """
+        Export parsing errors to JSON for easy review.
+        
+        Args:
+            output_path: Path to write JSON file
+            run_id: Optional run ID to filter by
+        """
+        errors = self.get_parsing_errors(run_id)
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(errors, f, indent=2, ensure_ascii=False, default=str)
+    
+    def get_parsing_errors_by_stage(self, stage: str, run_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Get parsing errors filtered by stage.
+        
+        Args:
+            stage: 'parsing', 'transform', or 'notion_upload'
+            run_id: Optional run ID to filter by
+            
+        Returns:
+            List of error records matching the stage
+        """
+        if run_id is not None:
+            cursor = self.conn.execute('''
+                SELECT * FROM parsing_errors 
+                WHERE stage = ? AND run_id = ?
+                ORDER BY timestamp
+            ''', (stage, run_id))
+        else:
+            cursor = self.conn.execute('''
+                SELECT * FROM parsing_errors 
+                WHERE stage = ?
+                ORDER BY run_id DESC, timestamp
+            ''', (stage,))
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def get_parsing_errors_by_error_type(self, error_type: str, run_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Get parsing errors filtered by error type (exception class name).
+        
+        Args:
+            error_type: Exception class name (e.g., 'AttributeError', 'KeyError')
+            run_id: Optional run ID to filter by
+            
+        Returns:
+            List of error records matching the error type
+        """
+        if run_id is not None:
+            cursor = self.conn.execute('''
+                SELECT * FROM parsing_errors 
+                WHERE error_type = ? AND run_id = ?
+                ORDER BY timestamp
+            ''', (error_type, run_id))
+        else:
+            cursor = self.conn.execute('''
+                SELECT * FROM parsing_errors 
+                WHERE error_type = ?
+                ORDER BY run_id DESC, timestamp
+            ''', (error_type,))
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def get_runs_with_errors(self) -> List[Dict[str, Any]]:
+        """
+        Get all import runs that had parsing errors, with error counts.
+        
+        Returns:
+            List of dicts with run info and error counts
+        """
+        cursor = self.conn.execute('''
+            SELECT 
+                ir.id as run_id,
+                ir.timestamp,
+                ir.total_pages,
+                COUNT(pe.id) as error_count,
+                SUM(CASE WHEN pe.stage = 'parsing' THEN 1 ELSE 0 END) as parsing_errors,
+                SUM(CASE WHEN pe.stage = 'transform' THEN 1 ELSE 0 END) as transform_errors,
+                SUM(CASE WHEN pe.stage = 'notion_upload' THEN 1 ELSE 0 END) as upload_errors
+            FROM import_runs ir
+            LEFT JOIN parsing_errors pe ON ir.id = pe.run_id
+            GROUP BY ir.id
+            HAVING error_count > 0
+            ORDER BY ir.timestamp DESC
+        ''')
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def get_error_type_summary(self, run_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Get summary of errors grouped by error type.
+        
+        Args:
+            run_id: Optional run ID to filter by
+            
+        Returns:
+            List of dicts with error_type and count, sorted by count DESC
+        """
+        if run_id is not None:
+            cursor = self.conn.execute('''
+                SELECT error_type, COUNT(*) as count
+                FROM parsing_errors
+                WHERE run_id = ?
+                GROUP BY error_type
+                ORDER BY count DESC
+            ''', (run_id,))
+        else:
+            cursor = self.conn.execute('''
+                SELECT error_type, COUNT(*) as count
+                FROM parsing_errors
+                GROUP BY error_type
+                ORDER BY count DESC
+            ''')
+        
+        return [dict(row) for row in cursor.fetchall()]
     
     def close(self):
         """Close database connection"""

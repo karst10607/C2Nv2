@@ -144,3 +144,5 @@ if 'emoticon' in img.get('class', []):
 3. **Emoji Mapping**: Map custom emoticons to closest emoji equivalents
 4. **GIF Handling**: Better detection of content GIFs vs. UI animations
 
+
+

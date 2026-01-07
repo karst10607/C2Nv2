@@ -304,3 +304,5 @@ parse_html_file: 210 ✅ (+10 for routing)
 - Day 3: Add macro detection cleanly
 
 This approach gives you a solid foundation for adding macro detection and any future features.
+
+

@@ -55,3 +55,5 @@ def parse_image(el: Tag) -> Optional[Dict[str, Any]]:
         return {'type': 'image', 'src': src}
     
     return None
+
+

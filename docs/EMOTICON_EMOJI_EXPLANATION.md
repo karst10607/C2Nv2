@@ -182,3 +182,5 @@ The "4 types" are:
 
 **Bottom Line**: We convert Confluence emoticon images to Notion emoji characters because they're semantically equivalent, but emoji is better (inline, lightweight, native support).
 
+
+

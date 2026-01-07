@@ -26,8 +26,10 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
   
-  // Dev tools enabled for debugging
-  mainWindow.webContents.openDevTools();
+  // Only open DevTools in development mode (not in packaged app)
+  if (!app.isPackaged) {
+    mainWindow.webContents.openDevTools();
+  }
 }
 
 app.whenReady().then(createWindow);
@@ -352,6 +354,70 @@ ipcMain.handle('cleanup-old-failures', async () => {
     });
     
     cleanupProcess.on('error', (err) => {
+      resolve({ success: false, error: err.message });
+    });
+  });
+});
+
+// Query parsing errors from database
+ipcMain.handle('get-parsing-errors', async (event, options = {}) => {
+  return new Promise((resolve) => {
+    const projectDir = path.join(__dirname, '..');
+    let cmd, args = [];
+    const env = { ...process.env };
+    
+    if (app.isPackaged) {
+      cmd = path.join(process.resourcesPath, 'python_dist', 'query_errors');
+      env.APP_RESOURCE_PATH = process.resourcesPath;
+    } else {
+      const venvPython = path.join(projectDir, '.venv', 'bin', 'python3');
+      const pythonCmd = fs.existsSync(venvPython) ? venvPython : 'python3';
+      cmd = pythonCmd;
+      args = [path.join(projectDir, 'python_tools', 'query_errors.py')];
+      env.APP_RESOURCE_PATH = projectDir;
+    }
+    
+    // Add optional filters
+    if (options.runId) {
+      args.push('--run-id', options.runId.toString());
+    }
+    if (options.stage) {
+      args.push('--stage', options.stage);
+    }
+    if (options.summary) {
+      args.push('--summary');
+    }
+    if (options.runsWithErrors) {
+      args.push('--runs-with-errors');
+    }
+    
+    const queryProcess = spawn(cmd, args, { cwd: projectDir, env });
+    
+    let output = '';
+    let errorOutput = '';
+    
+    queryProcess.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+    
+    queryProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+    
+    queryProcess.on('close', (code) => {
+      if (code === 0 && output) {
+        try {
+          const result = JSON.parse(output);
+          resolve({ success: true, ...result });
+        } catch (e) {
+          resolve({ success: false, error: 'Failed to parse response', output });
+        }
+      } else {
+        resolve({ success: false, error: errorOutput || `Process exited with code ${code}` });
+      }
+    });
+    
+    queryProcess.on('error', (err) => {
       resolve({ success: false, error: err.message });
     });
   });

@@ -569,4 +569,227 @@ function displayStatistics(stats) {
   statisticsContent.innerHTML = html;
 }
 
+// ===== Error Panel Functionality =====
+
+// Error panel elements
+const errorPanel = document.getElementById('error-panel');
+const panelToggle = document.getElementById('panel-toggle');
+const errorRunFilter = document.getElementById('error-run-filter');
+const errorStageFilter = document.getElementById('error-stage-filter');
+const refreshErrorsBtn = document.getElementById('refresh-errors');
+const errorList = document.getElementById('error-list');
+const errorDetail = document.getElementById('error-detail');
+const detailContent = document.getElementById('detail-content');
+const errorBackBtn = document.getElementById('error-back');
+const totalErrorsEl = document.getElementById('total-errors');
+const parsingErrorsEl = document.getElementById('parsing-errors');
+const uploadErrorsEl = document.getElementById('upload-errors');
+
+// State for error panel
+let currentErrors = [];
+let runsWithErrors = [];
+
+// Toggle panel collapsed state
+panelToggle.addEventListener('click', () => {
+  errorPanel.classList.toggle('collapsed');
+});
+
+// Refresh errors
+refreshErrorsBtn.addEventListener('click', () => {
+  loadErrors();
+});
+
+// Filter change handlers
+errorRunFilter.addEventListener('change', () => {
+  loadErrors();
+});
+
+errorStageFilter.addEventListener('change', () => {
+  loadErrors();
+});
+
+// Back button in detail view
+errorBackBtn.addEventListener('click', () => {
+  errorDetail.style.display = 'none';
+  errorList.style.display = 'block';
+});
+
+// Load runs with errors for the filter dropdown
+async function loadRunsWithErrors() {
+  const result = await electronAPI.getParsingErrors({ runsWithErrors: true });
+  
+  if (result.success && result.data) {
+    runsWithErrors = result.data;
+    
+    // Update the run filter dropdown
+    let options = '<option value="all">All Runs</option>';
+    options += '<option value="latest">Latest Run</option>';
+    
+    for (const run of runsWithErrors) {
+      const date = new Date(run.timestamp).toLocaleDateString();
+      options += `<option value="${run.run_id}">Run #${run.run_id} (${date}) - ${run.error_count} errors</option>`;
+    }
+    
+    errorRunFilter.innerHTML = options;
+  }
+}
+
+// Load errors based on current filters
+async function loadErrors() {
+  const runValue = errorRunFilter.value;
+  const stageValue = errorStageFilter.value;
+  
+  const options = {};
+  
+  if (runValue === 'latest' && runsWithErrors.length > 0) {
+    options.runId = runsWithErrors[0].run_id;
+  } else if (runValue !== 'all') {
+    options.runId = parseInt(runValue);
+  }
+  
+  if (stageValue !== 'all') {
+    options.stage = stageValue;
+  }
+  
+  const result = await electronAPI.getParsingErrors(options);
+  
+  if (result.success && result.data) {
+    currentErrors = result.data.errors || [];
+    const summary = result.data.summary || { total: 0, parsing_count: 0, upload_count: 0 };
+    
+    // Update summary stats
+    totalErrorsEl.textContent = summary.total || 0;
+    parsingErrorsEl.textContent = summary.parsing_count || 0;
+    uploadErrorsEl.textContent = summary.upload_count || 0;
+    
+    // Render error list
+    renderErrorList(currentErrors);
+  } else {
+    errorList.innerHTML = '<div class="error-empty">Failed to load errors.</div>';
+  }
+}
+
+// Render the error list
+function renderErrorList(errors) {
+  if (!errors || errors.length === 0) {
+    errorList.innerHTML = '<div class="error-empty">No errors recorded yet.</div>';
+    return;
+  }
+  
+  let html = '';
+  
+  for (const err of errors) {
+    const timestamp = new Date(err.timestamp).toLocaleString();
+    const shortMessage = err.error_message.length > 80 
+      ? err.error_message.substring(0, 80) + '...' 
+      : err.error_message;
+    
+    html += `
+      <div class="error-item stage-${err.stage}" data-error-id="${err.id}">
+        <div class="error-item-header">
+          <span class="error-filename">${err.filename}</span>
+          <span class="error-stage">${err.stage}</span>
+        </div>
+        <div class="error-message">${err.error_type}: ${shortMessage}</div>
+        <div class="error-meta">
+          <span>Run #${err.run_id}</span>
+          <span>${timestamp}</span>
+        </div>
+      </div>
+    `;
+  }
+  
+  errorList.innerHTML = html;
+  
+  // Add click handlers to show detail
+  document.querySelectorAll('.error-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const errorId = parseInt(item.dataset.errorId);
+      showErrorDetail(errorId);
+    });
+  });
+}
+
+// Show error detail view
+function showErrorDetail(errorId) {
+  const error = currentErrors.find(e => e.id === errorId);
+  if (!error) return;
+  
+  let html = `
+    <div class="detail-section">
+      <h4>File</h4>
+      <div class="detail-value">${error.filename}</div>
+    </div>
+    
+    <div class="detail-section">
+      <h4>Full Path</h4>
+      <div class="detail-value">${error.file_path}</div>
+    </div>
+    
+    <div class="detail-section">
+      <h4>Stage</h4>
+      <div class="detail-value">${error.stage}</div>
+    </div>
+    
+    <div class="detail-section">
+      <h4>Error Type</h4>
+      <div class="detail-value">${error.error_type}</div>
+    </div>
+    
+    <div class="detail-section">
+      <h4>Error Message</h4>
+      <div class="detail-value">${error.error_message}</div>
+    </div>
+    
+    <div class="detail-section">
+      <h4>Timestamp</h4>
+      <div class="detail-value">${new Date(error.timestamp).toLocaleString()}</div>
+    </div>
+  `;
+  
+  if (error.traceback) {
+    html += `
+      <div class="detail-section">
+        <h4>Traceback</h4>
+        <div class="detail-traceback">${escapeHtml(error.traceback)}</div>
+      </div>
+    `;
+  }
+  
+  detailContent.innerHTML = html;
+  errorList.style.display = 'none';
+  errorDetail.style.display = 'flex';
+}
+
+// Escape HTML for safe display
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Load errors on startup and after import
+async function initErrorPanel() {
+  await loadRunsWithErrors();
+  await loadErrors();
+}
+
+// Refresh error panel after import completes
+const originalOnImportLog = electronAPI.onImportLog;
+electronAPI.onImportLog((data) => {
+  appendLog(data);
+  parseProgress(data);
+  
+  // Check if import completed and refresh errors
+  if (data.includes('Import Complete') || data.includes('Parsing/Conversion Errors')) {
+    setTimeout(() => {
+      loadRunsWithErrors();
+      loadErrors();
+    }, 1000);
+  }
+});
+
+// Initialize error panel
+initErrorPanel();
+
 })(); // End of IIFE
