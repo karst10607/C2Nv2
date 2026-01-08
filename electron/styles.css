@@ -672,10 +672,13 @@ footer code {
   padding: 12px 15px;
   background: #16213e;
   border-bottom: 1px solid #2d3748;
+  flex-wrap: nowrap;
+  align-items: center;
 }
 
 .error-filters select {
   flex: 1;
+  min-width: 0;
   padding: 8px 10px;
   background: #2d3748;
   border: 1px solid #4a5568;
@@ -694,10 +697,13 @@ footer code {
   background: #2d3748;
   border: 1px solid #4a5568;
   color: #e0e0e0;
-  padding: 8px 12px;
+  padding: 8px 10px;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
+  flex-shrink: 0;
+  min-width: 36px;
+  text-align: center;
 }
 
 .btn-icon:hover {
