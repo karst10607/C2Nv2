@@ -363,10 +363,20 @@ async function runImport() {
   }
 }
 
-// Listen for import logs
+// Listen for import logs (single handler - also refreshes error panel)
 electronAPI.onImportLog((data) => {
   appendLog(data);
   parseProgress(data);
+  
+  // Refresh error panel when import completes
+  if (data.includes('Import Complete') || data.includes('Parsing/Conversion Errors')) {
+    setTimeout(() => {
+      if (typeof loadRunsWithErrors === 'function') {
+        loadRunsWithErrors();
+        loadErrors();
+      }
+    }, 1000);
+  }
 });
 
 function appendLog(text) {
@@ -774,22 +784,7 @@ async function initErrorPanel() {
   await loadErrors();
 }
 
-// Refresh error panel after import completes
-const originalOnImportLog = electronAPI.onImportLog;
-electronAPI.onImportLog((data) => {
-  appendLog(data);
-  parseProgress(data);
-  
-  // Check if import completed and refresh errors
-  if (data.includes('Import Complete') || data.includes('Parsing/Conversion Errors')) {
-    setTimeout(() => {
-      loadRunsWithErrors();
-      loadErrors();
-    }, 1000);
-  }
-});
-
-// Initialize error panel
+// Initialize error panel on startup
 initErrorPanel();
 
 })(); // End of IIFE
