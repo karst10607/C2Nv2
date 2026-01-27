@@ -110,14 +110,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 });
 
 // Sync source directories between tabs
-sourceDirInput.addEventListener('change', () => {
-  if (sourceDirNotionInput) sourceDirNotionInput.value = sourceDirInput.value;
-});
-if (sourceDirNotionInput) {
-  sourceDirNotionInput.addEventListener('change', () => {
-    sourceDirInput.value = sourceDirNotionInput.value;
-  });
-}
+// Each tab has independent source directory - no syncing between tabs
 
 // Handle upload mode changes
 uploadModeSelect.addEventListener('change', () => {
@@ -161,10 +154,11 @@ uploadModeSelect.addEventListener('change', () => {
   notionTokenInput.value = currentConfig.NOTION_TOKEN || '';
   parentIdInput.value = currentConfig.PARENT_ID || '';
   
-  // Set source directory in both tabs
-  const sourceDir = currentConfig.SOURCE_DIR || '';
-  sourceDirInput.value = sourceDir;
-  if (sourceDirNotionInput) sourceDirNotionInput.value = sourceDir;
+  // Don't auto-fill source directory - let user browse each session
+  // This avoids confusion when switching between different exports
+  sourceDirInput.value = '';
+  if (sourceDirNotionInput) sourceDirNotionInput.value = '';
+  if (analyzeSourceDirInput) analyzeSourceDirInput.value = '';
   
   maxColumnsInput.value = currentConfig.MAX_COLUMNS || 6;
   preserveLayoutCheckbox.checked = currentConfig.PRESERVE_LAYOUT !== false;
@@ -239,8 +233,6 @@ browseBtn.addEventListener('click', async () => {
   const folder = await electronAPI.browseFolder();
   if (folder) {
     sourceDirInput.value = folder;
-    // Sync to Notion tab
-    if (sourceDirNotionInput) sourceDirNotionInput.value = folder;
   }
 });
 
@@ -250,8 +242,6 @@ if (browseBtnNotion) {
     const folder = await electronAPI.browseFolder();
     if (folder) {
       sourceDirNotionInput.value = folder;
-      // Sync to Markdown tab
-      sourceDirInput.value = folder;
     }
   });
 }

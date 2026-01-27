@@ -65,6 +65,8 @@ class ErrorCode(Enum):
     MD_EXPORT_ATTACHMENTS_NOT_FOUND = "E10001"  # Attachments folder not found (page ID extraction issue)
     MD_EXPORT_ASSET_COPY_FAILED = "E10002"  # Failed to copy asset file
     MD_EXPORT_WRITE_FAILED = "E10003"  # Failed to write markdown file
+    MD_EXPORT_CONVERSION_ERROR = "E10004"  # General conversion error during MD export
+    MD_EXPORT_SOURCE_NOT_FOUND = "E10005"  # Source directory not found or invalid
     
     # Warning Codes (9xxx) - Not errors but important notifications
     WARN_TABLE_CELL_TRUNCATED = "W9001"
@@ -186,6 +188,8 @@ ERROR_MESSAGES = {
     ErrorCode.MD_EXPORT_ATTACHMENTS_NOT_FOUND: "Attachments folder not found - Confluence HTML filename format not recognized. Expected 'PageTitle_PageID.html' or 'PageID.html' where PageID matches attachments/PageID/ folder",
     ErrorCode.MD_EXPORT_ASSET_COPY_FAILED: "Failed to copy asset file to output directory",
     ErrorCode.MD_EXPORT_WRITE_FAILED: "Failed to write markdown file to output directory",
+    ErrorCode.MD_EXPORT_CONVERSION_ERROR: "Markdown conversion failed - check source HTML format and content",
+    ErrorCode.MD_EXPORT_SOURCE_NOT_FOUND: "Source directory not found or does not contain valid Confluence export",
     
     ErrorCode.WARN_TABLE_CELL_TRUNCATED: "Table cell content truncated to fit Notion's 2000 character limit",
     ErrorCode.WARN_ATTACHMENT_NOT_SUPPORTED: "Attachment type not supported for Notion import",
