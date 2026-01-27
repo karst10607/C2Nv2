@@ -161,6 +161,109 @@ main {
   background: var(--bg-secondary);
 }
 
+/* Light theme specific fixes */
+[data-theme="light"] .analysis-results,
+[data-theme="light"] .analysis-results h4 {
+  color: #333;
+}
+
+[data-theme="light"] .category-tag,
+[data-theme="light"] .extension-tag {
+  color: #333;
+  background: rgba(102, 126, 234, 0.15);
+  border-color: rgba(102, 126, 234, 0.4);
+}
+
+[data-theme="light"] .category-tag.video {
+  background: rgba(255, 107, 107, 0.15);
+  border-color: rgba(255, 107, 107, 0.5);
+  color: #c0392b;
+}
+
+[data-theme="light"] .category-tag.image {
+  background: rgba(78, 205, 196, 0.15);
+  border-color: rgba(78, 205, 196, 0.5);
+  color: #16a085;
+}
+
+[data-theme="light"] .category-tag.audio {
+  background: rgba(255, 193, 7, 0.15);
+  border-color: rgba(255, 193, 7, 0.5);
+  color: #d68910;
+}
+
+[data-theme="light"] .category-tag.document {
+  background: rgba(76, 175, 80, 0.15);
+  border-color: rgba(76, 175, 80, 0.5);
+  color: #27ae60;
+}
+
+[data-theme="light"] .category-tag.archive {
+  background: rgba(142, 68, 173, 0.15);
+  border-color: rgba(142, 68, 173, 0.5);
+  color: #8e44ad;
+}
+
+[data-theme="light"] .category-tag.no_extension,
+[data-theme="light"] .category-tag.other {
+  background: rgba(127, 140, 141, 0.15);
+  border-color: rgba(127, 140, 141, 0.5);
+  color: #7f8c8d;
+}
+
+[data-theme="light"] .tag-count {
+  background: rgba(0, 0, 0, 0.1);
+  color: #333;
+}
+
+[data-theme="light"] .tag-size {
+  color: #666;
+}
+
+[data-theme="light"] .summary-item {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.2);
+}
+
+[data-theme="light"] .summary-item .value {
+  color: #667eea;
+}
+
+[data-theme="light"] .summary-item .label {
+  color: #666;
+}
+
+[data-theme="light"] .analysis-results {
+  background: #f8f9fa;
+  border-color: rgba(102, 126, 234, 0.2);
+}
+
+[data-theme="light"] .video-section {
+  background: rgba(255, 107, 107, 0.08);
+  border-color: rgba(255, 107, 107, 0.3);
+}
+
+[data-theme="light"] .file-list {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="light"] .file-item {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid #e0e0e0;
+}
+
+[data-theme="light"] .file-name {
+  color: #333;
+}
+
+[data-theme="light"] .file-path {
+  color: #666;
+}
+
+[data-theme="light"] .file-size {
+  color: #888;
+}
+
 /* ===== Tab Navigation ===== */
 .tab-container {
   margin-bottom: 25px;
