@@ -26,10 +26,37 @@ out/
 *.log
 electron.log
 
+# Large bundled binaries (ship via releases, not git)
+python_dist/
+bundled_tools/cloudflared-*
+
+# Test/sample HTML exports (too large for repo)
+EP/
+IDP/
+LOGISTICS*/
+
 # Config files with sensitive data
 .env
+.env.*
+!.env.example
 config.json
 .notion_importer/
+
+# Secrets and credentials (NEVER commit these)
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+id_rsa*
+id_ed25519*
+*.keystore
+credentials.json
+secrets.json
+*_secret*
+*_token*
+.aws/
+.ssh/
 
 # IDE
 .vscode/
@@ -47,6 +74,29 @@ test_token.sh
 test_notion_direct.py
 quick_test.sh
 
+# Debug scripts (not needed in repo)
+debug_*.py
+analyze_*.py
+check_*.py
+test_*.py
+!tests/test_*.py
+
+# Jupyter cache
+.jupyter_cache/
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# Documentation build output
+docs/_build/
+
+# Database files (contain user data)
+*.db
+*.sqlite
+*.sqlite3
+
 # Temporary files
 *.tmp
 *.bak
+# Obsidian
+.obsidian/
+*.canvas
