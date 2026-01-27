@@ -843,12 +843,17 @@ def _export_nested(
                 print(f"  ✓ Created: {folder_name}/README.md (no assets)")
             
         except Exception as e:
+            import traceback
             stats['failed'] += 1
-            stats['errors'].append({
+            error_info = {
                 'file': str(html_file),
-                'error': str(e)
-            })
-            print(f"  ✗ Failed: {html_file.name} - {e}")
+                'filename': html_file.name,
+                'error_code': 'E10004',  # MD_EXPORT_CONVERSION_ERROR
+                'error': str(e),
+                'traceback': traceback.format_exc()
+            }
+            stats['errors'].append(error_info)
+            print(f"  ✗ [E10004] Failed: {html_file.name} - {e}")
     
     # Create index file with links to all pages
     _create_index(output_path, stats['pages'])
@@ -909,12 +914,17 @@ def _export_flat(
                 print(f"  ✓ Created: {md_filename} (no assets)")
             
         except Exception as e:
+            import traceback
             stats['failed'] += 1
-            stats['errors'].append({
+            error_info = {
                 'file': str(html_file),
-                'error': str(e)
-            })
-            print(f"  ✗ Failed: {html_file.name} - {e}")
+                'filename': html_file.name,
+                'error_code': 'E10004',  # MD_EXPORT_CONVERSION_ERROR
+                'error': str(e),
+                'traceback': traceback.format_exc()
+            }
+            stats['errors'].append(error_info)
+            print(f"  ✗ [E10004] Failed: {html_file.name} - {e}")
     
     print(f"\nExport complete:")
     print(f"  Successful: {stats['successful']}/{stats['total_files']}")

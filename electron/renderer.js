@@ -112,6 +112,29 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 // Sync source directories between tabs
 // Each tab has independent source directory - no syncing between tabs
 
+// ===== Theme Toggle =====
+const themeToggle = document.getElementById('theme-toggle');
+const themeIcon = themeToggle?.querySelector('.theme-icon');
+
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  if (themeIcon) {
+    themeIcon.textContent = theme === 'dark' ? '☀️' : '🌙';
+  }
+  localStorage.setItem('theme', theme);
+}
+
+// Load saved theme or default to dark
+const savedTheme = localStorage.getItem('theme') || 'dark';
+setTheme(savedTheme);
+
+if (themeToggle) {
+  themeToggle.addEventListener('click', () => {
+    const currentTheme = document.documentElement.getAttribute('data-theme');
+    setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+  });
+}
+
 // Handle upload mode changes
 uploadModeSelect.addEventListener('change', () => {
   const mode = uploadModeSelect.value;
