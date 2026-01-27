@@ -61,6 +61,11 @@ class ErrorCode(Enum):
     PARSE_NESTED_LIST = "E8001"
     PARSE_DEEP_NESTED_LIST = "E8002"
     
+    # Markdown Export Errors (10xxx)
+    MD_EXPORT_ATTACHMENTS_NOT_FOUND = "E10001"  # Attachments folder not found (page ID extraction issue)
+    MD_EXPORT_ASSET_COPY_FAILED = "E10002"  # Failed to copy asset file
+    MD_EXPORT_WRITE_FAILED = "E10003"  # Failed to write markdown file
+    
     # Warning Codes (9xxx) - Not errors but important notifications
     WARN_TABLE_CELL_TRUNCATED = "W9001"
     WARN_ATTACHMENT_NOT_SUPPORTED = "W9002"
@@ -130,6 +135,11 @@ class ImportProcessError(NotionImporterError):
     pass
 
 
+class MarkdownExportError(NotionImporterError):
+    """Markdown export errors"""
+    pass
+
+
 # Error message templates
 ERROR_MESSAGES = {
     ErrorCode.CONFIG_MISSING_SOURCE: "Source directory not configured",
@@ -172,6 +182,10 @@ ERROR_MESSAGES = {
     
     ErrorCode.PARSE_NESTED_LIST: "Complex list structure flattened - nested paragraphs combined",
     ErrorCode.PARSE_DEEP_NESTED_LIST: "Deeply nested lists flattened - Notion only supports 2-3 levels of nesting",
+    
+    ErrorCode.MD_EXPORT_ATTACHMENTS_NOT_FOUND: "Attachments folder not found - Confluence HTML filename format not recognized. Expected 'PageTitle_PageID.html' or 'PageID.html' where PageID matches attachments/PageID/ folder",
+    ErrorCode.MD_EXPORT_ASSET_COPY_FAILED: "Failed to copy asset file to output directory",
+    ErrorCode.MD_EXPORT_WRITE_FAILED: "Failed to write markdown file to output directory",
     
     ErrorCode.WARN_TABLE_CELL_TRUNCATED: "Table cell content truncated to fit Notion's 2000 character limit",
     ErrorCode.WARN_ATTACHMENT_NOT_SUPPORTED: "Attachment type not supported for Notion import",

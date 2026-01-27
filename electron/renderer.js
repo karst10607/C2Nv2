@@ -3,28 +3,70 @@
   const { electronAPI } = window;
   let currentConfig = {};
   let isImporting = false;
+  let currentTab = 'md-export';
 
-// DOM elements
+// DOM elements - Common
+const sourceDirInput = document.getElementById('source-dir');
+const browseBtn = document.getElementById('browse-btn');
+const statisticsBtn = document.getElementById('statistics-btn');
+const statisticsModal = document.getElementById('statistics-modal');
+const statisticsClose = document.getElementById('statistics-close');
+const statisticsContent = document.getElementById('statistics-content');
+const logOutput = document.getElementById('log-output');
+
+// DOM elements - Markdown Export tab
+const exportMdBtn = document.getElementById('export-md-btn');
+const mdImageWidthInput = document.getElementById('md-image-width');
+const mdTableImageWidthInput = document.getElementById('md-table-image-width');
+const imageWidthGroup = document.getElementById('image-width-group');
+const tableImageWidthGroup = document.getElementById('table-image-width-group');
+
+// DOM elements - Analyze tab
+const analyzeSourceDirInput = document.getElementById('analyze-source-dir');
+const analyzeBrowseBtn = document.getElementById('analyze-browse-btn');
+const analyzeBtn = document.getElementById('analyze-btn');
+const analysisResults = document.getElementById('analysis-results');
+const analysisSummaryContent = document.getElementById('analysis-summary-content');
+const analysisCategoriesContent = document.getElementById('analysis-categories-content');
+const analysisExtensionsContent = document.getElementById('analysis-extensions-content');
+const videoSection = document.getElementById('video-section');
+const videoList = document.getElementById('video-list');
+const convertAllMp3Btn = document.getElementById('convert-all-mp3-btn');
+const deleteOriginalsCheckbox = document.getElementById('delete-originals-checkbox');
+const largeFilesSection = document.getElementById('large-files-section');
+const largeFilesList = document.getElementById('large-files-list');
+
+// Handle markdown format radio buttons
+document.querySelectorAll('input[name="md-format"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    const isGitHub = e.target.value === 'github';
+    if (imageWidthGroup) imageWidthGroup.style.display = isGitHub ? 'block' : 'none';
+    if (tableImageWidthGroup) tableImageWidthGroup.style.display = isGitHub ? 'block' : 'none';
+  });
+});
+
+function getSelectedMdFormat() {
+  const selected = document.querySelector('input[name="md-format"]:checked');
+  return selected ? selected.value : 'obsidian';
+}
+
+// DOM elements - Notion Import tab
 const notionTokenInput = document.getElementById('notion-token');
 const parentIdInput = document.getElementById('parent-id');
-const sourceDirInput = document.getElementById('source-dir');
+const sourceDirNotionInput = document.getElementById('source-dir-notion');
+const browseBtnNotion = document.getElementById('browse-btn-notion');
 const maxColumnsInput = document.getElementById('max-columns');
 const preserveLayoutCheckbox = document.getElementById('preserve-layout');
 const minColumnHeightInput = document.getElementById('min-column-height');
 const skipMissingMediaCheckbox = document.getElementById('skip-missing-media');
 const testConnectionBtn = document.getElementById('test-connection');
 const connectionStatus = document.getElementById('connection-status');
-const browseBtn = document.getElementById('browse-btn');
 const saveBtn = document.getElementById('save-btn');
-const statisticsBtn = document.getElementById('statistics-btn');
+const statisticsBtnNotion = document.getElementById('statistics-btn-notion');
 const importBtn = document.getElementById('import-btn');
-const statisticsModal = document.getElementById('statistics-modal');
-const statisticsClose = document.getElementById('statistics-close');
-const statisticsContent = document.getElementById('statistics-content');
 const retryBtn = document.getElementById('retry-btn');
 const cleanupBtn = document.getElementById('cleanup-btn');
 const stopBtn = document.getElementById('stop-btn');
-const logOutput = document.getElementById('log-output');
 
 // Upload mode elements
 const uploadModeSelect = document.getElementById('upload-mode');
@@ -49,6 +91,33 @@ const progressText = document.getElementById('progress-text');
 const progressPercent = document.getElementById('progress-percent');
 const progressTime = document.getElementById('progress-time');
 const progressEta = document.getElementById('progress-eta');
+
+// ===== Tab Navigation =====
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tabId = btn.dataset.tab;
+    
+    // Update active tab button
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    
+    // Update active tab content
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.getElementById('tab-' + tabId).classList.add('active');
+    
+    currentTab = tabId;
+  });
+});
+
+// Sync source directories between tabs
+sourceDirInput.addEventListener('change', () => {
+  if (sourceDirNotionInput) sourceDirNotionInput.value = sourceDirInput.value;
+});
+if (sourceDirNotionInput) {
+  sourceDirNotionInput.addEventListener('change', () => {
+    sourceDirInput.value = sourceDirNotionInput.value;
+  });
+}
 
 // Handle upload mode changes
 uploadModeSelect.addEventListener('change', () => {
@@ -91,13 +160,22 @@ uploadModeSelect.addEventListener('change', () => {
   currentConfig = await electronAPI.loadConfig();
   notionTokenInput.value = currentConfig.NOTION_TOKEN || '';
   parentIdInput.value = currentConfig.PARENT_ID || '';
-  sourceDirInput.value = currentConfig.SOURCE_DIR || '';
+  
+  // Set source directory in both tabs
+  const sourceDir = currentConfig.SOURCE_DIR || '';
+  sourceDirInput.value = sourceDir;
+  if (sourceDirNotionInput) sourceDirNotionInput.value = sourceDir;
+  
   maxColumnsInput.value = currentConfig.MAX_COLUMNS || 6;
   preserveLayoutCheckbox.checked = currentConfig.PRESERVE_LAYOUT !== false;
   minColumnHeightInput.value = currentConfig.MIN_COLUMN_HEIGHT || 3;
   skipMissingMediaCheckbox.checked = currentConfig.SKIP_MISSING_MEDIA !== false;
   document.getElementById('use-async').checked = currentConfig.USE_ASYNC !== false;
   document.getElementById('skip-verification').checked = currentConfig.SKIP_VERIFICATION === true;
+  
+  // Load markdown export settings
+  if (mdImageWidthInput) mdImageWidthInput.value = currentConfig.MD_IMAGE_WIDTH || 600;
+  if (mdTableImageWidthInput) mdTableImageWidthInput.value = currentConfig.MD_TABLE_IMAGE_WIDTH || 400;
   
   // Load upload mode settings
   uploadModeSelect.value = currentConfig.UPLOAD_MODE || 's3';
@@ -156,29 +234,49 @@ testConnectionBtn.addEventListener('click', async () => {
   testConnectionBtn.disabled = false;
 });
 
-// Browse folder
+// Browse folder - Markdown tab
 browseBtn.addEventListener('click', async () => {
   const folder = await electronAPI.browseFolder();
   if (folder) {
     sourceDirInput.value = folder;
+    // Sync to Notion tab
+    if (sourceDirNotionInput) sourceDirNotionInput.value = folder;
   }
 });
+
+// Browse folder - Notion tab
+if (browseBtnNotion) {
+  browseBtnNotion.addEventListener('click', async () => {
+    const folder = await electronAPI.browseFolder();
+    if (folder) {
+      sourceDirNotionInput.value = folder;
+      // Sync to Markdown tab
+      sourceDirInput.value = folder;
+    }
+  });
+}
 
 // Save config
 saveBtn.addEventListener('click', async () => {
   const uploadMode = uploadModeSelect.value;
   
+  // Use Notion source dir if available, otherwise use the common one
+  const sourceDir = sourceDirNotionInput ? sourceDirNotionInput.value.trim() : sourceDirInput.value.trim();
+  
   const config = {
     NOTION_TOKEN: notionTokenInput.value.trim(),
     PARENT_ID: parentIdInput.value.trim(),
-    SOURCE_DIR: sourceDirInput.value.trim(),
+    SOURCE_DIR: sourceDir,
     MAX_COLUMNS: parseInt(maxColumnsInput.value) || 6,
     PRESERVE_LAYOUT: preserveLayoutCheckbox.checked,
     MIN_COLUMN_HEIGHT: parseInt(minColumnHeightInput.value) || 3,
     SKIP_MISSING_MEDIA: skipMissingMediaCheckbox.checked,
     UPLOAD_MODE: uploadMode,
     USE_ASYNC: document.getElementById('use-async').checked,
-    SKIP_VERIFICATION: document.getElementById('skip-verification').checked
+    SKIP_VERIFICATION: document.getElementById('skip-verification').checked,
+    // Markdown export settings
+    MD_IMAGE_WIDTH: parseInt(mdImageWidthInput?.value) || 600,
+    MD_TABLE_IMAGE_WIDTH: parseInt(mdTableImageWidthInput?.value) || 400
   };
   
   // Add mode-specific settings
@@ -213,9 +311,13 @@ saveBtn.addEventListener('click', async () => {
   }
 });
 
-// Show statistics
-statisticsBtn.addEventListener('click', async () => {
-  const sourceDir = sourceDirInput.value.trim();
+// Show statistics - shared function
+async function showStatistics() {
+  // Get source dir from current tab
+  const sourceDir = currentTab === 'md-export' 
+    ? sourceDirInput.value.trim() 
+    : (sourceDirNotionInput ? sourceDirNotionInput.value.trim() : sourceDirInput.value.trim());
+  
   if (!sourceDir) {
     alert('Please select a source directory first');
     return;
@@ -234,7 +336,15 @@ statisticsBtn.addEventListener('click', async () => {
   } catch (error) {
     statisticsContent.innerHTML = `<div class="statistics-loading" style="color: #e53e3e;">Error: ${error.message}</div>`;
   }
-});
+}
+
+// Show statistics - Markdown tab
+statisticsBtn.addEventListener('click', showStatistics);
+
+// Show statistics - Notion tab
+if (statisticsBtnNotion) {
+  statisticsBtnNotion.addEventListener('click', showStatistics);
+}
 
 // Close statistics modal
 statisticsClose.addEventListener('click', () => {
@@ -265,6 +375,266 @@ importBtn.addEventListener('click', async () => {
 
   await runImport();
 });
+
+// Export to GitHub Markdown
+exportMdBtn.addEventListener('click', async () => {
+  const sourceDir = sourceDirInput.value.trim();
+  
+  if (!sourceDir) {
+    alert('Please select a source directory first');
+    return;
+  }
+  
+  // Ask user for output directory
+  const outputDir = await electronAPI.browseSaveFolder();
+  if (!outputDir) {
+    return; // User cancelled
+  }
+  
+  await runMarkdownExport(sourceDir, outputDir);
+});
+
+// ===== Analyze Tab Event Handlers =====
+
+// Browse for analyze source directory
+if (analyzeBrowseBtn) {
+  analyzeBrowseBtn.addEventListener('click', async () => {
+    const folder = await electronAPI.browseFolder();
+    if (folder) {
+      analyzeSourceDirInput.value = folder;
+    }
+  });
+}
+
+// Run attachment analysis
+if (analyzeBtn) {
+  analyzeBtn.addEventListener('click', async () => {
+    const sourceDir = analyzeSourceDirInput.value.trim();
+    
+    if (!sourceDir) {
+      alert('Please select a Confluence export folder first');
+      return;
+    }
+    
+    analyzeBtn.disabled = true;
+    analyzeBtn.textContent = '🔄 Analyzing...';
+    
+    try {
+      const result = await electronAPI.analyzeAttachments(sourceDir);
+      displayAnalysisResults(result);
+    } catch (err) {
+      alert('Analysis failed: ' + err.message);
+    } finally {
+      analyzeBtn.disabled = false;
+      analyzeBtn.textContent = '🔍 Analyze Attachments';
+    }
+  });
+}
+
+// Convert all videos to MP3
+if (convertAllMp3Btn) {
+  convertAllMp3Btn.addEventListener('click', async () => {
+    const sourceDir = analyzeSourceDirInput.value.trim();
+    const deleteOriginals = deleteOriginalsCheckbox?.checked || false;
+    
+    if (!sourceDir) {
+      alert('Please run analysis first');
+      return;
+    }
+    
+    const confirmMsg = deleteOriginals
+      ? 'This will convert all videos to MP3 and DELETE the original video files. Continue?'
+      : 'This will convert all videos to MP3 (keeping originals). Continue?';
+    
+    if (!confirm(confirmMsg)) return;
+    
+    convertAllMp3Btn.disabled = true;
+    convertAllMp3Btn.textContent = '🔄 Converting...';
+    
+    try {
+      const result = await electronAPI.convertVideosToMp3({
+        sourceDir,
+        deleteOriginals
+      });
+      
+      if (result.success) {
+        alert(`Converted ${result.converted} videos to MP3${result.failed ? ` (${result.failed} failed)` : ''}`);
+        // Re-run analysis to refresh the list
+        analyzeBtn.click();
+      } else {
+        alert('Conversion failed: ' + (result.error || 'Unknown error'));
+      }
+    } catch (err) {
+      alert('Conversion failed: ' + err.message);
+    } finally {
+      convertAllMp3Btn.disabled = false;
+      convertAllMp3Btn.textContent = '🎵 Convert All to MP3';
+    }
+  });
+}
+
+// Display analysis results
+function displayAnalysisResults(result) {
+  if (!result.success) {
+    alert('Analysis failed: ' + (result.error || 'Unknown error'));
+    return;
+  }
+  
+  analysisResults.style.display = 'block';
+  
+  // Summary
+  analysisSummaryContent.innerHTML = `
+    <div class="summary-grid">
+      <div class="summary-item">
+        <div class="value">${result.total_files}</div>
+        <div class="label">Total Files</div>
+      </div>
+      <div class="summary-item">
+        <div class="value">${result.total_size_formatted}</div>
+        <div class="label">Total Size</div>
+      </div>
+      <div class="summary-item">
+        <div class="value">${Object.keys(result.categories || {}).length}</div>
+        <div class="label">Categories</div>
+      </div>
+      <div class="summary-item">
+        <div class="value">${Object.keys(result.extensions || {}).length}</div>
+        <div class="label">Extensions</div>
+      </div>
+    </div>
+  `;
+  
+  // Categories
+  const categoryIcons = {
+    video: '🎬',
+    audio: '🎵',
+    image: '🖼️',
+    document: '📄',
+    data: '📊',
+    archive: '📦',
+    code: '💻',
+    other: '📎',
+    no_extension: '❓'
+  };
+  
+  let categoriesHtml = '<div class="tag-list">';
+  for (const [category, data] of Object.entries(result.categories || {})) {
+    const icon = categoryIcons[category] || '📎';
+    categoriesHtml += `
+      <div class="category-tag ${category}">
+        <span>${icon} ${category}</span>
+        <span class="tag-count">${data.count}</span>
+        <span class="tag-size">${data.size_formatted}</span>
+      </div>
+    `;
+  }
+  categoriesHtml += '</div>';
+  analysisCategoriesContent.innerHTML = categoriesHtml;
+  
+  // Extensions (sorted by count)
+  const sortedExtensions = Object.entries(result.extensions || {})
+    .sort((a, b) => b[1].count - a[1].count);
+  
+  let extensionsHtml = '<div class="tag-list">';
+  for (const [ext, data] of sortedExtensions) {
+    extensionsHtml += `
+      <div class="extension-tag">
+        <span>${ext}</span>
+        <span class="tag-count">${data.count}</span>
+        <span class="tag-size">${data.size_formatted}</span>
+      </div>
+    `;
+  }
+  extensionsHtml += '</div>';
+  analysisExtensionsContent.innerHTML = extensionsHtml;
+  
+  // Video files
+  if (result.has_videos && result.video_files?.length > 0) {
+    videoSection.style.display = 'block';
+    
+    let videoHtml = '';
+    for (const video of result.video_files) {
+      videoHtml += `
+        <div class="file-item" data-path="${video.path}">
+          <div class="file-info">
+            <div class="file-name">🎬 ${video.name}</div>
+            <div class="file-path">${video.relative_path}</div>
+          </div>
+          <div class="file-size">${video.size_formatted}</div>
+          <div class="file-actions">
+            <button class="delete-btn" onclick="deleteFile('${video.path.replace(/'/g, "\\'")}')">🗑️ Delete</button>
+          </div>
+        </div>
+      `;
+    }
+    videoList.innerHTML = videoHtml;
+  } else {
+    videoSection.style.display = 'none';
+  }
+  
+  // Large files (>10MB)
+  const largeFiles = [];
+  const SIZE_THRESHOLD = 10 * 1024 * 1024; // 10MB
+  
+  for (const category of Object.values(result.categories || {})) {
+    for (const file of category.files || []) {
+      if (file.size > SIZE_THRESHOLD) {
+        largeFiles.push(file);
+      }
+    }
+  }
+  
+  if (largeFiles.length > 0) {
+    largeFilesSection.style.display = 'block';
+    largeFiles.sort((a, b) => b.size - a.size);
+    
+    let largeHtml = '';
+    for (const file of largeFiles.slice(0, 20)) {
+      const icon = categoryIcons[file.category] || '📎';
+      largeHtml += `
+        <div class="file-item" data-path="${file.path}">
+          <div class="file-info">
+            <div class="file-name">${icon} ${file.name}</div>
+            <div class="file-path">${file.relative_path}</div>
+          </div>
+          <div class="file-size">${file.size_formatted}</div>
+          <div class="file-actions">
+            <button class="delete-btn" onclick="deleteFile('${file.path.replace(/'/g, "\\'")}')">🗑️ Delete</button>
+          </div>
+        </div>
+      `;
+    }
+    if (largeFiles.length > 20) {
+      largeHtml += `<div style="text-align: center; color: #888; padding: 10px;">... and ${largeFiles.length - 20} more large files</div>`;
+    }
+    largeFilesList.innerHTML = largeHtml;
+  } else {
+    largeFilesSection.style.display = 'none';
+  }
+}
+
+// Delete a single file
+async function deleteFile(filePath) {
+  if (!confirm(`Delete this file?\n${filePath}`)) return;
+  
+  try {
+    const result = await electronAPI.deleteAttachment(filePath);
+    if (result.success) {
+      // Remove from UI
+      const item = document.querySelector(`.file-item[data-path="${filePath}"]`);
+      if (item) {
+        item.remove();
+      }
+    } else {
+      alert('Failed to delete: ' + (result.error || 'Unknown error'));
+    }
+  } catch (err) {
+    alert('Failed to delete: ' + err.message);
+  }
+}
+
+// Make deleteFile available globally for onclick handlers
+window.deleteFile = deleteFile;
 
 // Retry failed images
 retryBtn.addEventListener('click', async () => {
@@ -313,10 +683,13 @@ let progressTimer = null;
 async function runImport() {
   if (isImporting) return;
 
+  // Use Notion-specific source dir if available
+  const sourceDir = sourceDirNotionInput ? sourceDirNotionInput.value.trim() : sourceDirInput.value.trim();
+
   const config = {
     NOTION_TOKEN: notionTokenInput.value.trim(),
     PARENT_ID: parentIdInput.value.trim(),
-    SOURCE_DIR: sourceDirInput.value.trim(),
+    SOURCE_DIR: sourceDir,
     MAX_COLUMNS: parseInt(maxColumnsInput.value) || 6,
     PRESERVE_LAYOUT: preserveLayoutCheckbox.checked,
     MIN_COLUMN_HEIGHT: parseInt(minColumnHeightInput.value) || 3
@@ -360,6 +733,53 @@ async function runImport() {
     updateProgress(); // Final update with actual counts
   } else {
     appendLog('\n✗ Failed: ' + (result.error || 'Unknown error') + '\n');
+  }
+}
+
+// Run markdown export
+async function runMarkdownExport(sourceDir, outputDir) {
+  if (isImporting) return;
+
+  logOutput.textContent = '';
+  isImporting = true;
+  importBtn.disabled = true;
+  exportMdBtn.disabled = true;
+  statisticsBtn.disabled = true;
+
+  const mdFormat = getSelectedMdFormat();
+  const imageWidth = parseInt(mdImageWidthInput?.value) || 600;
+  const tableImageWidth = parseInt(mdTableImageWidthInput?.value) || 400;
+
+  const formatLabel = mdFormat === 'github' ? 'GitHub Flavored' : 'Standard Markdown (Obsidian/VS Code)';
+  appendLog(`Starting Markdown export (${formatLabel})...\n`);
+  appendLog(`Source: ${sourceDir}\n`);
+  appendLog(`Output: ${outputDir}\n`);
+  if (mdFormat === 'github') {
+    appendLog(`Image width: ${imageWidth}px, Table image width: ${tableImageWidth}px\n`);
+  }
+  appendLog('\n');
+
+  const config = {
+    SOURCE_DIR: sourceDir,
+    OUTPUT_DIR: outputDir,
+    TABLE_IMAGE_WIDTH: tableImageWidth,
+    IMAGE_WIDTH: imageWidth,
+    MD_FORMAT: mdFormat
+  };
+
+  const result = await electronAPI.exportMarkdown(config);
+
+  importBtn.disabled = false;
+  exportMdBtn.disabled = false;
+  statisticsBtn.disabled = false;
+  isImporting = false;
+
+  if (result.success) {
+    appendLog('\n✓ Markdown export completed!\n');
+    appendLog(`\nOutput written to: ${outputDir}\n`);
+    alert(`Export complete!\n\nMarkdown files and assets saved to:\n${outputDir}`);
+  } else {
+    appendLog('\n✗ Export failed: ' + (result.error || 'Unknown error') + '\n');
   }
 }
 
@@ -522,61 +942,204 @@ async function runCleanup() {
   }
 }
 
-// Display statistics in modal
+// Display statistics in modal with pie charts and export buttons
 function displayStatistics(stats) {
-  let html = '<div class="statistics-section">';
-  html += '<h3>📁 Files</h3>';
-  html += `<div class="statistics-item"><span class="statistics-label">Total HTML files scanned</span><span class="statistics-value">${stats.total_files}</span></div>`;
+  // Store stats for export
+  window.currentStats = stats;
+  
+  let html = '';
+  
+  // Export buttons
+  html += '<div class="statistics-export-bar">';
+  html += '<span class="export-label">📥 Export:</span>';
+  html += '<button class="export-btn" data-format="html">🌐 HTML</button>';
+  html += '<button class="export-btn" data-format="csv">📊 CSV</button>';
+  html += '<button class="export-btn" data-format="pdf">📄 PDF</button>';
+  html += '<button class="export-btn" data-format="json">{ } JSON</button>';
   html += '</div>';
   
-  html += '<div class="statistics-section">';
-  html += '<h3>📊 Tables</h3>';
-  html += `<div class="statistics-item"><span class="statistics-label">Total tables</span><span class="statistics-value">${stats.tables.total}</span></div>`;
-  html += `<div class="statistics-item"><span class="statistics-label">Files with tables</span><span class="statistics-value">${stats.tables.files_with_tables}</span></div>`;
-  html += `<div class="statistics-item"><span class="statistics-label">Tables with merged cells</span><span class="statistics-value">${stats.tables.with_merged_cells}</span></div>`;
-  html += `<div class="statistics-item"><span class="statistics-label">Total merged cells</span><span class="statistics-value">${stats.tables.merged_cell_count}</span></div>`;
-  if (stats.tables.merged_cell_count > 0) {
-    html += `<div class="statistics-subitem">• Horizontal merges (colspan): ${stats.tables.colspan_count}</div>`;
-    html += `<div class="statistics-subitem">• Vertical merges (rowspan): ${stats.tables.rowspan_count}</div>`;
+  // Summary cards
+  html += '<div class="statistics-summary-grid">';
+  html += `<div class="stat-card"><div class="stat-value">${stats.total_files}</div><div class="stat-label">Total Files</div></div>`;
+  html += `<div class="stat-card"><div class="stat-value">${stats.tables?.total || 0}</div><div class="stat-label">Tables</div></div>`;
+  html += `<div class="stat-card"><div class="stat-value">${stats.drawio?.total || 0}</div><div class="stat-label">Draw.io</div></div>`;
+  html += `<div class="stat-card"><div class="stat-value">${stats.layouts?.total || 0}</div><div class="stat-label">Layouts</div></div>`;
+  html += `<div class="stat-card"><div class="stat-value">${Object.keys(stats.authors || {}).length}</div><div class="stat-label">Contributors</div></div>`;
+  html += `<div class="stat-card"><div class="stat-value">${stats.metadata_count || 0}</div><div class="stat-label">With Metadata</div></div>`;
+  html += '</div>';
+  
+  // Content Distribution Pie Chart
+  const contentData = {
+    'Tables': stats.tables?.total || 0,
+    'Layouts': stats.layouts?.total || 0,
+    'Videos': stats.videos?.total || 0,
+    'Draw.io': stats.drawio?.total || 0,
+    'PlantUML': stats.plantuml?.total || 0
+  };
+  const filteredContent = Object.entries(contentData).filter(([k,v]) => v > 0);
+  
+  if (filteredContent.length > 0) {
+    html += '<div class="statistics-section">';
+    html += '<h3>📊 Content Type Distribution</h3>';
+    html += '<div class="pie-chart-container">';
+    html += generatePieChart(Object.fromEntries(filteredContent));
+    html += '</div>';
+    html += '</div>';
   }
-  html += '</div>';
   
-  html += '<div class="statistics-section">';
-  html += '<h3>📐 Side-by-Side Layouts</h3>';
-  html += `<div class="statistics-item"><span class="statistics-label">Total layouts</span><span class="statistics-value">${stats.layouts.total}</span></div>`;
-  html += `<div class="statistics-item"><span class="statistics-label">Files with layouts</span><span class="statistics-value">${stats.layouts.files_with_layouts}</span></div>`;
-  
-  if (Object.keys(stats.layouts.by_type).length > 0) {
-    html += '<div class="statistics-grid">';
-    for (const [layoutType, count] of Object.entries(stats.layouts.by_type)) {
-      html += `<div class="statistics-card">`;
-      html += `<div class="statistics-card-label">${layoutType}</div>`;
-      html += `<div class="statistics-card-value">${count}</div>`;
-      html += `</div>`;
+  // Authors/Contributors section
+  if (stats.authors && Object.keys(stats.authors).length > 0) {
+    html += '<div class="statistics-section">';
+    html += '<h3>👥 Top Contributors</h3>';
+    html += '<table class="contributors-table">';
+    html += '<thead><tr><th>Name</th><th>Created</th><th>Edited</th><th>Total</th></tr></thead>';
+    html += '<tbody>';
+    
+    const authorList = Object.entries(stats.authors)
+      .map(([name, data]) => ({ name, created: data.created, edited: data.edited, total: data.created + data.edited }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
+    
+    for (const author of authorList) {
+      html += `<tr><td>${author.name}</td><td>${author.created}</td><td>${author.edited}</td><td><strong>${author.total}</strong></td></tr>`;
+    }
+    html += '</tbody></table>';
+    
+    if (Object.keys(stats.authors).length > 10) {
+      html += `<div class="statistics-note">... and ${Object.keys(stats.authors).length - 10} more contributors</div>`;
     }
     html += '</div>';
   }
+  
+  // Yearly Activity
+  if (stats.yearly?.modified && Object.keys(stats.yearly.modified).length > 0) {
+    html += '<div class="statistics-section">';
+    html += '<h3>📆 Activity by Year</h3>';
+    html += '<div class="bar-chart-container">';
+    html += generateBarChart(stats.yearly.modified, 'Pages Modified');
+    html += '</div>';
+    html += '</div>';
+  }
+  
+  // Monthly Timeline
+  if (stats.timeline?.modified && Object.keys(stats.timeline.modified).length > 0) {
+    html += '<div class="statistics-section">';
+    html += '<h3>📅 Monthly Activity (Last Modified)</h3>';
+    html += '<div class="timeline-chart-container">';
+    const timelineData = Object.fromEntries(
+      Object.entries(stats.timeline.modified).slice(-12)  // Last 12 months
+    );
+    html += generateBarChart(timelineData, 'Pages');
+    html += '</div>';
+    html += '</div>';
+  }
+  
+  // Detailed content sections (collapsible)
+  html += '<details class="statistics-details">';
+  html += '<summary>📋 Detailed Content Analysis</summary>';
+  
+  html += '<div class="statistics-section">';
+  html += '<h3>📊 Tables</h3>';
+  html += `<div class="statistics-item"><span class="statistics-label">Total tables</span><span class="statistics-value">${stats.tables?.total || 0}</span></div>`;
+  html += `<div class="statistics-item"><span class="statistics-label">Files with tables</span><span class="statistics-value">${stats.tables?.files_with_tables || 0}</span></div>`;
+  html += `<div class="statistics-item"><span class="statistics-label">Tables with merged cells</span><span class="statistics-value">${stats.tables?.with_merged_cells || 0}</span></div>`;
   html += '</div>';
   
   html += '<div class="statistics-section">';
-  html += '<h3>🎥 Videos</h3>';
-  html += `<div class="statistics-item"><span class="statistics-label">Total videos</span><span class="statistics-value">${stats.videos?.total || 0}</span></div>`;
-  html += `<div class="statistics-item"><span class="statistics-label">Files with videos</span><span class="statistics-value">${stats.videos?.files_with_videos || 0}</span></div>`;
+  html += '<h3>🎥 Media</h3>';
+  html += `<div class="statistics-item"><span class="statistics-label">Videos</span><span class="statistics-value">${stats.videos?.total || 0}</span></div>`;
+  html += `<div class="statistics-item"><span class="statistics-label">Draw.io diagrams</span><span class="statistics-value">${stats.drawio?.total || 0}</span></div>`;
+  html += `<div class="statistics-item"><span class="statistics-label">PlantUML diagrams</span><span class="statistics-value">${stats.plantuml?.total || 0}</span></div>`;
   html += '</div>';
   
-  html += '<div class="statistics-section">';
-  html += '<h3>📊 Draw.io Diagrams</h3>';
-  html += `<div class="statistics-item"><span class="statistics-label">Total Draw.io diagrams</span><span class="statistics-value">${stats.drawio?.total || 0}</span></div>`;
-  html += `<div class="statistics-item"><span class="statistics-label">Files with Draw.io</span><span class="statistics-value">${stats.drawio?.files_with_drawio || 0}</span></div>`;
-  html += '</div>';
-  
-  html += '<div class="statistics-section">';
-  html += '<h3>🌿 PlantUML Diagrams</h3>';
-  html += `<div class="statistics-item"><span class="statistics-label">Total PlantUML diagrams</span><span class="statistics-value">${stats.plantuml?.total || 0}</span></div>`;
-  html += `<div class="statistics-item"><span class="statistics-label">Files with PlantUML</span><span class="statistics-value">${stats.plantuml?.files_with_plantuml || 0}</span></div>`;
-  html += '</div>';
+  html += '</details>';
   
   statisticsContent.innerHTML = html;
+  
+  // Add export button handlers
+  document.querySelectorAll('.export-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const format = btn.dataset.format;
+      const sourceDir = sourceDirInput.value.trim();
+      if (!sourceDir) {
+        alert('No source directory selected');
+        return;
+      }
+      
+      btn.disabled = true;
+      btn.textContent = '⏳ Exporting...';
+      
+      try {
+        const result = await electronAPI.exportStatistics(sourceDir, format);
+        if (result.success) {
+          alert(`✓ Exported to:\n${result.path}`);
+        } else {
+          alert(`Export failed: ${result.error}`);
+        }
+      } catch (err) {
+        alert(`Export error: ${err.message}`);
+      }
+      
+      // Restore button
+      const labels = { html: '🌐 HTML', csv: '📊 CSV', pdf: '📄 PDF', json: '{ } JSON' };
+      btn.textContent = labels[format];
+      btn.disabled = false;
+    });
+  });
+}
+
+// Generate CSS-based pie chart
+function generatePieChart(data) {
+  const total = Object.values(data).reduce((a, b) => a + b, 0);
+  if (total === 0) return '<p>No data</p>';
+  
+  const colors = ['#4ecdc4', '#ff6b6b', '#45b7d1', '#96ceb4', '#ffeaa7', '#dfe6e9'];
+  let cumulativePercent = 0;
+  let gradientParts = [];
+  let legendHtml = '<div class="pie-legend">';
+  
+  Object.entries(data).forEach(([label, value], index) => {
+    const percent = (value / total) * 100;
+    const color = colors[index % colors.length];
+    const startPercent = cumulativePercent;
+    cumulativePercent += percent;
+    
+    gradientParts.push(`${color} ${startPercent}% ${cumulativePercent}%`);
+    legendHtml += `<div class="legend-item"><span class="legend-color" style="background:${color}"></span>${label}: ${value} (${percent.toFixed(1)}%)</div>`;
+  });
+  
+  legendHtml += '</div>';
+  
+  const pieStyle = `background: conic-gradient(${gradientParts.join(', ')})`;
+  
+  return `
+    <div class="pie-chart-wrapper">
+      <div class="pie-chart" style="${pieStyle}"></div>
+      ${legendHtml}
+    </div>
+  `;
+}
+
+// Generate CSS-based bar chart
+function generateBarChart(data, label) {
+  const maxValue = Math.max(...Object.values(data), 1);
+  let html = '<div class="bar-chart">';
+  
+  Object.entries(data).forEach(([key, value]) => {
+    const percent = (value / maxValue) * 100;
+    html += `
+      <div class="bar-row">
+        <span class="bar-label">${key}</span>
+        <div class="bar-container">
+          <div class="bar-fill" style="width: ${percent}%"></div>
+          <span class="bar-value">${value}</span>
+        </div>
+      </div>
+    `;
+  });
+  
+  html += '</div>';
+  return html;
 }
 
 // ===== Error Panel Functionality =====

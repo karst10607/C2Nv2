@@ -15,159 +15,295 @@
       </header>
 
       <main>
-      <section class="config-section">
-        <h2>Configuration</h2>
-        
-        <div class="form-group">
-          <label for="notion-token">Notion Integration Token</label>
-          <input type="password" id="notion-token" placeholder="secret_...">
-          <button id="test-connection" class="btn-secondary">Test Connection</button>
-          <span id="connection-status"></span>
+      <!-- Tab Navigation -->
+      <div class="tab-container">
+        <div class="tab-nav">
+          <button class="tab-btn" data-tab="analyze">
+            <span class="tab-icon">🔍</span>Analyze
+          </button>
+          <button class="tab-btn active" data-tab="md-export">
+            <span class="tab-icon">📝</span>GitHub Markdown
+          </button>
+          <button class="tab-btn" data-tab="notion-import">
+            <span class="tab-icon">📦</span>Notion Import
+          </button>
         </div>
+      </div>
 
-        <div class="form-group">
-          <label for="parent-id">Parent Page/Database ID (optional)</label>
-          <input type="text" id="parent-id" placeholder="32-character hex ID">
-          <small>Leave empty to specify later with --parent-id flag</small>
-        </div>
+      <!-- Tab 0: Analyze Attachments -->
+      <div class="tab-content" id="tab-analyze">
+        <section class="config-section">
+          <div class="analyze-section">
+            <h3>🔍 Analyze Attachments</h3>
+            <p class="section-description">Scan Confluence export to see attachment types before conversion</p>
 
-        <div class="form-group">
-          <label for="source-dir">Source HTML Folder</label>
-          <div class="input-with-button">
-            <input type="text" id="source-dir" placeholder="/path/to/confluence/export">
-            <button id="browse-btn" class="btn-secondary">Browse</button>
+            <div class="form-group">
+              <label for="analyze-source-dir">Confluence Export Folder</label>
+              <div class="input-with-button">
+                <input type="text" id="analyze-source-dir" placeholder="/path/to/confluence/export">
+                <button id="analyze-browse-btn" class="browse-btn">Browse</button>
+              </div>
+            </div>
+
+            <div class="button-group">
+              <button id="analyze-btn" class="analyze-btn">🔍 Analyze Attachments</button>
+            </div>
+
+            <!-- Analysis Results -->
+            <div id="analysis-results" class="analysis-results" style="display: none;">
+              <div class="analysis-summary">
+                <h4>📊 Summary</h4>
+                <div id="analysis-summary-content"></div>
+              </div>
+
+              <div class="analysis-categories">
+                <h4>📁 By Category</h4>
+                <div id="analysis-categories-content"></div>
+              </div>
+
+              <div class="analysis-extensions">
+                <h4>📄 By Extension</h4>
+                <div id="analysis-extensions-content"></div>
+              </div>
+
+              <!-- Video Section -->
+              <div id="video-section" class="video-section" style="display: none;">
+                <h4>🎬 Video Files</h4>
+                <p class="video-hint">Videos found in your export. Choose what to do with them:</p>
+                
+                <div class="video-actions">
+                  <button id="convert-all-mp3-btn" class="action-btn convert-btn">
+                    🎵 Convert All to MP3
+                  </button>
+                  <label class="checkbox-option">
+                    <input type="checkbox" id="delete-originals-checkbox">
+                    Delete original videos after conversion
+                  </label>
+                </div>
+
+                <div id="video-list" class="file-list"></div>
+              </div>
+
+              <!-- Large Files Section -->
+              <div id="large-files-section" class="large-files-section" style="display: none;">
+                <h4>📦 Large Files (>10MB)</h4>
+                <div id="large-files-list" class="file-list"></div>
+              </div>
+            </div>
           </div>
-        </div>
+        </section>
+      </div>
 
-        <div class="form-group">
-          <label for="max-columns">Max Columns per Row</label>
-          <input type="number" id="max-columns" value="6" min="1" max="20">
-          <small>Table rows with more columns will wrap into multiple column_lists</small>
-        </div>
-
-        <div class="form-group">
-          <label for="preserve-layout">
-            <input type="checkbox" id="preserve-layout" checked>
-            Preserve Table Layout
-          </label>
-          <small>Add spacers to align columns with mixed image/text content</small>
-        </div>
-
-        <div class="form-group">
-          <label for="min-column-height">Min Column Height (blocks)</label>
-          <input type="number" id="min-column-height" value="3" min="1" max="10">
-          <small>Minimum height for table columns with images (helps alignment)</small>
-        </div>
-
-        <div class="form-group">
-          <label for="skip-missing-media">
-            <input type="checkbox" id="skip-missing-media" checked>
-            Skip Missing Media Files
-          </label>
-          <small>Continue import even if some images/files are missing (e.g., placeholder images)</small>
-        </div>
-
-        <div class="form-group">
-          <label for="upload-mode">🖼️ Image Upload Mode</label>
-          <select id="upload-mode">
-            <option value="s3">☁️ S3 Auto-Delete (Auto-cleanup after 1 day) ⭐ RECOMMENDED</option>
-            <option value="notion_native">📦 Notion Native (S3 bridge, experimental)</option>
-            <option value="tunnel">🌐 Tunnel (Fast but may 404)</option>
-            <option value="cloudflare">☁️ Cloudflare R2 (Auto-delete, cheaper)</option>
-            <option value="s3_permanent">☁️ S3 Permanent (Manual cleanup)</option>
-          </select>
-          <small id="mode-description" class="mode-help">Upload to S3 with lifecycle auto-delete after 1 day. Reliable and cheap (~$0.001).</small>
-        </div>
-
-        <!-- Tunnel config -->
-        <div class="upload-config" id="tunnel-config" style="display:none;">
-          <div class="config-card">
-            <h3>Tunnel Settings</h3>
-            <label>Keepalive Duration (seconds)</label>
-            <input type="number" id="tunnel-keepalive" value="600" min="60" max="3600">
-            <small>How long to keep tunnel alive after import (600s = 10 min)</small>
+      <!-- Tab 1: GitHub Markdown Export -->
+      <div class="tab-content active" id="tab-md-export">
+        <section class="config-section">
+          <div class="md-export-section">
+            <h3>📝 Export to GitHub Markdown</h3>
+            <p>Convert Confluence HTML to GitHub-flavored Markdown with proper image sizing and table handling.</p>
           </div>
-        </div>
 
-        <!-- S3 config -->
-        <div class="upload-config" id="s3-config">
-          <div class="config-card">
-            <h3>AWS S3 Settings (Auto-Delete)</h3>
-            <label>Bucket Name</label>
-            <input type="text" id="s3-bucket" placeholder="notion-temp-images">
-            <label>Region</label>
-            <input type="text" id="s3-region" value="us-west-2">
-            <label>Access Key ID</label>
-            <input type="password" id="s3-access-key">
-            <label>Secret Access Key</label>
-            <input type="password" id="s3-secret-key">
-            <label>
-              <input type="checkbox" id="s3-use-presigned" checked>
-              Use pre-signed URLs (expires in 1 hour, more secure)
+          <div class="form-group">
+            <label for="source-dir">Source HTML Folder</label>
+            <div class="input-with-button">
+              <input type="text" id="source-dir" placeholder="/path/to/confluence/export">
+              <button id="browse-btn" class="btn-secondary">Browse</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Markdown Format</label>
+            <div class="radio-group">
+              <label class="radio-option">
+                <input type="radio" name="md-format" value="obsidian" checked>
+                <span class="radio-label">📝 Standard Markdown (Obsidian/VS Code)</span>
+                <small>Uses `![alt](path)` - works everywhere, no image sizing</small>
+              </label>
+              <label class="radio-option">
+                <input type="radio" name="md-format" value="github">
+                <span class="radio-label">🐙 GitHub Flavored</span>
+                <small>Uses `<img width="...">` - image sizing, GitHub only</small>
+              </label>
+            </div>
+          </div>
+
+          <div class="form-group" id="image-width-group" style="display: none;">
+            <label for="md-image-width">Image Width (px)</label>
+            <input type="number" id="md-image-width" value="600" min="100" max="1200">
+            <small>Max width for standalone images in Markdown</small>
+          </div>
+
+          <div class="form-group" id="table-image-width-group" style="display: none;">
+            <label for="md-table-image-width">Table Image Width (px)</label>
+            <input type="number" id="md-table-image-width" value="400" min="100" max="800">
+            <small>Max width for images inside tables</small>
+          </div>
+
+          <div class="button-group">
+            <button id="statistics-btn" class="btn-secondary">📊 Show Statistics</button>
+            <button id="export-md-btn" class="btn-primary">📝 Export to Markdown</button>
+          </div>
+        </section>
+      </div>
+
+      <!-- Tab 2: Notion Import -->
+      <div class="tab-content" id="tab-notion-import">
+        <section class="config-section">
+          <div class="notion-import-section">
+            <h3>📦 Import to Notion</h3>
+            <p>Import Confluence HTML exports directly into your Notion workspace.</p>
+          </div>
+
+          <div class="form-group">
+            <label for="notion-token">Notion Integration Token</label>
+            <input type="password" id="notion-token" placeholder="secret_...">
+            <button id="test-connection" class="btn-secondary">Test Connection</button>
+            <span id="connection-status"></span>
+          </div>
+
+          <div class="form-group">
+            <label for="parent-id">Parent Page/Database ID (optional)</label>
+            <input type="text" id="parent-id" placeholder="32-character hex ID">
+            <small>Leave empty to specify later with --parent-id flag</small>
+          </div>
+
+          <div class="form-group">
+            <label for="source-dir-notion">Source HTML Folder</label>
+            <div class="input-with-button">
+              <input type="text" id="source-dir-notion" placeholder="/path/to/confluence/export">
+              <button id="browse-btn-notion" class="btn-secondary">Browse</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="max-columns">Max Columns per Row</label>
+            <input type="number" id="max-columns" value="6" min="1" max="20">
+            <small>Table rows with more columns will wrap into multiple column_lists</small>
+          </div>
+
+          <div class="form-group">
+            <label for="preserve-layout">
+              <input type="checkbox" id="preserve-layout" checked>
+              Preserve Table Layout
             </label>
-            <label>Auto-delete after (days)</label>
-            <input type="number" id="s3-lifecycle-days" value="1" min="1" max="30">
-            <small>⚠️ Must configure lifecycle rule in S3 console for auto-delete</small>
+            <small>Add spacers to align columns with mixed image/text content</small>
           </div>
-        </div>
 
-        <!-- Cloudflare config -->
-        <div class="upload-config" id="cloudflare-config" style="display:none;">
-          <div class="config-card">
-            <h3>Cloudflare R2 Settings</h3>
-            <label>Bucket Name</label>
-            <input type="text" id="cf-bucket" placeholder="notion-imports">
-            <label>Account ID</label>
-            <input type="text" id="cf-account-id" placeholder="abc123...">
-            <label>Access Key ID</label>
-            <input type="password" id="cf-access-key">
-            <label>Secret Access Key</label>
-            <input type="password" id="cf-secret-key">
-            <label>Public Domain (R2 custom domain)</label>
-            <input type="text" id="cf-public-domain" placeholder="images.yourdomain.com">
+          <div class="form-group">
+            <label for="min-column-height">Min Column Height (blocks)</label>
+            <input type="number" id="min-column-height" value="3" min="1" max="10">
+            <small>Minimum height for table columns with images (helps alignment)</small>
           </div>
-        </div>
 
-        <!-- Notion Native config -->
-        <div class="upload-config" id="notion-config" style="display:none;">
-          <div class="config-card warning-card">
-            <h3>⚠️ Notion Native Upload (Experimental)</h3>
-            <p><strong>How it works:</strong> Uses S3 temp storage as a bridge → Notion downloads and (hopefully) converts to 'file' type → S3 auto-deletes after 1 day</p>
-            <p><strong>Pros:</strong> Images become Notion-hosted permanently (file type, not external)</p>
-            <p><strong>Cons:</strong> Experimental, requires AWS S3 account (same as S3 Auto-Delete mode)</p>
-            <p><strong>⚠️ Note:</strong> Uses the SAME S3 credentials as "S3 Auto-Delete" mode. Configure S3 settings above first!</p>
-            <label>
-              <input type="checkbox" id="notion-accept-risk">
-              I understand this is experimental and requires S3 account
+          <div class="form-group">
+            <label for="skip-missing-media">
+              <input type="checkbox" id="skip-missing-media" checked>
+              Skip Missing Media Files
             </label>
+            <small>Continue import even if some images/files are missing (e.g., placeholder images)</small>
           </div>
-        </div>
 
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="use-async" checked>
-            ⚡ Use Async Verification (10x faster, recommended for CDN modes)
-          </label>
-          <small>Concurrent API calls for faster verification</small>
-        </div>
+          <div class="form-group">
+            <label for="upload-mode">🖼️ Image Upload Mode</label>
+            <select id="upload-mode">
+              <option value="s3">☁️ S3 Auto-Delete (Auto-cleanup after 1 day) ⭐ RECOMMENDED</option>
+              <option value="notion_native">📦 Notion Native (S3 bridge, experimental)</option>
+              <option value="tunnel">🌐 Tunnel (Fast but may 404)</option>
+              <option value="cloudflare">☁️ Cloudflare R2 (Auto-delete, cheaper)</option>
+              <option value="s3_permanent">☁️ S3 Permanent (Manual cleanup)</option>
+            </select>
+            <small id="mode-description" class="mode-help">Upload to S3 with lifecycle auto-delete after 1 day. Reliable and cheap (~$0.001).</small>
+          </div>
 
-        <div class="form-group">
-          <label>
-            <input type="checkbox" id="skip-verification">
-            🚀 Skip Image Verification
-          </label>
-          <small>Faster import by skipping image cache checks (saves ~8s per image)</small>
-        </div>
+          <!-- Tunnel config -->
+          <div class="upload-config" id="tunnel-config" style="display:none;">
+            <div class="config-card">
+              <h3>Tunnel Settings</h3>
+              <label>Keepalive Duration (seconds)</label>
+              <input type="number" id="tunnel-keepalive" value="600" min="60" max="3600">
+              <small>How long to keep tunnel alive after import (600s = 10 min)</small>
+            </div>
+          </div>
 
-        <div class="button-group">
-          <button id="save-btn" class="btn-primary">Save Configuration</button>
-          <button id="statistics-btn" class="btn-secondary">📊 Show Statistics</button>
-          <button id="import-btn" class="btn-primary">Start Import</button>
-          <button id="retry-btn" class="btn-warning">🔄 Auto-Retry Failed</button>
-          <button id="cleanup-btn" class="btn-secondary">🗑️ Clean Old Failures</button>
-          <button id="stop-btn" class="btn-danger" style="display:none;">Stop</button>
-        </div>
-      </section>
+          <!-- S3 config -->
+          <div class="upload-config" id="s3-config">
+            <div class="config-card">
+              <h3>AWS S3 Settings (Auto-Delete)</h3>
+              <label>Bucket Name</label>
+              <input type="text" id="s3-bucket" placeholder="notion-temp-images">
+              <label>Region</label>
+              <input type="text" id="s3-region" value="us-west-2">
+              <label>Access Key ID</label>
+              <input type="password" id="s3-access-key">
+              <label>Secret Access Key</label>
+              <input type="password" id="s3-secret-key">
+              <label>
+                <input type="checkbox" id="s3-use-presigned" checked>
+                Use pre-signed URLs (expires in 1 hour, more secure)
+              </label>
+              <label>Auto-delete after (days)</label>
+              <input type="number" id="s3-lifecycle-days" value="1" min="1" max="30">
+              <small>⚠️ Must configure lifecycle rule in S3 console for auto-delete</small>
+            </div>
+          </div>
+
+          <!-- Cloudflare config -->
+          <div class="upload-config" id="cloudflare-config" style="display:none;">
+            <div class="config-card">
+              <h3>Cloudflare R2 Settings</h3>
+              <label>Bucket Name</label>
+              <input type="text" id="cf-bucket" placeholder="notion-imports">
+              <label>Account ID</label>
+              <input type="text" id="cf-account-id" placeholder="abc123...">
+              <label>Access Key ID</label>
+              <input type="password" id="cf-access-key">
+              <label>Secret Access Key</label>
+              <input type="password" id="cf-secret-key">
+              <label>Public Domain (R2 custom domain)</label>
+              <input type="text" id="cf-public-domain" placeholder="images.yourdomain.com">
+            </div>
+          </div>
+
+          <!-- Notion Native config -->
+          <div class="upload-config" id="notion-config" style="display:none;">
+            <div class="config-card warning-card">
+              <h3>⚠️ Notion Native Upload (Experimental)</h3>
+              <p><strong>How it works:</strong> Uses S3 temp storage as a bridge → Notion downloads and (hopefully) converts to 'file' type → S3 auto-deletes after 1 day</p>
+              <p><strong>Pros:</strong> Images become Notion-hosted permanently (file type, not external)</p>
+              <p><strong>Cons:</strong> Experimental, requires AWS S3 account (same as S3 Auto-Delete mode)</p>
+              <p><strong>⚠️ Note:</strong> Uses the SAME S3 credentials as "S3 Auto-Delete" mode. Configure S3 settings above first!</p>
+              <label>
+                <input type="checkbox" id="notion-accept-risk">
+                I understand this is experimental and requires S3 account
+              </label>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="use-async" checked>
+              ⚡ Use Async Verification (10x faster, recommended for CDN modes)
+            </label>
+            <small>Concurrent API calls for faster verification</small>
+          </div>
+
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="skip-verification">
+              🚀 Skip Image Verification
+            </label>
+            <small>Faster import by skipping image cache checks (saves ~8s per image)</small>
+          </div>
+
+          <div class="button-group">
+            <button id="save-btn" class="btn-primary">Save Configuration</button>
+            <button id="statistics-btn-notion" class="btn-secondary">📊 Show Statistics</button>
+            <button id="import-btn" class="btn-primary">Start Import</button>
+            <button id="retry-btn" class="btn-warning">🔄 Auto-Retry Failed</button>
+            <button id="cleanup-btn" class="btn-secondary">🗑️ Clean Old Failures</button>
+            <button id="stop-btn" class="btn-danger" style="display:none;">Stop</button>
+          </div>
+        </section>
+      </div>
 
       <section class="summary-section" id="summary-section" style="display:none;">
         <h2>📊 Import Summary</h2>

@@ -95,6 +95,17 @@ ipcMain.handle('browse-folder', async () => {
   return null;
 });
 
+ipcMain.handle('browse-save-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory', 'createDirectory'],
+    title: 'Select Output Folder for Markdown Export'
+  });
+  if (!result.canceled && result.filePaths.length > 0) {
+    return result.filePaths[0];
+  }
+  return null;
+});
+
 ipcMain.handle('test-connection', async (event, token) => {
   console.log('Test connection IPC received, token length:', token.length);
   return new Promise((resolve) => {
@@ -119,7 +130,10 @@ ipcMain.handle('test-connection', async (event, token) => {
       child.on('error', (err) => resolve({ success: false, error: err.message }));
     } else {
       // Dev: use venv python if present, else system python3
-      const venvPython = path.join(projectDir, '.venv', 'bin', 'python3');
+      // Check both venv and .venv directories
+      const venvPath1 = path.join(projectDir, 'venv', 'bin', 'python3');
+      const venvPath2 = path.join(projectDir, '.venv', 'bin', 'python3');
+      const venvPython = fs.existsSync(venvPath1) ? venvPath1 : venvPath2;
       const pythonCmd = fs.existsSync(venvPython) ? venvPython : 'python3';
       console.log('Using Python:', pythonCmd);
       const pythonCode = `import sys\nimport os\nsys.path.insert(0, '${projectDir}')\ntry:\n    from notion_client import Client\n    token = """${token}"""\n    client = Client(auth=token)\n    client.users.me()\n    print("OK")\nexcept Exception as e:\n    import traceback\n    print(f"ERROR: {e}", file=sys.stderr)\n    print(traceback.format_exc(), file=sys.stderr)\n    sys.exit(1)\n`;
@@ -150,13 +164,16 @@ ipcMain.handle('get-statistics', async (event, sourceDir) => {
     if (app.isPackaged) {
       // Use packaged Python
       cmd = path.join(process.resourcesPath, 'python_dist', process.platform === 'win32' ? 'python.exe' : 'python');
-      args = ['-m', 'src.statistics', '--source-dir', sourceDir];
+      args = ['-m', 'src.statistics', '--source-dir', sourceDir, '--comprehensive', '--json'];
       env.APP_RESOURCE_PATH = process.resourcesPath;
     } else {
-      // Dev: python -m src.statistics
-      const venvPython = path.join(projectDir, '.venv', 'bin', 'python3');
+      // Dev: python -m src.statistics --comprehensive --json
+      // Check both venv and .venv directories
+      const venvPath1 = path.join(projectDir, 'venv', 'bin', 'python3');
+      const venvPath2 = path.join(projectDir, '.venv', 'bin', 'python3');
+      const venvPython = fs.existsSync(venvPath1) ? venvPath1 : venvPath2;
       cmd = fs.existsSync(venvPython) ? venvPython : 'python3';
-      args = ['-m', 'src.statistics', '--source-dir', sourceDir];
+      args = ['-m', 'src.statistics', '--source-dir', sourceDir, '--comprehensive', '--json'];
       env.APP_RESOURCE_PATH = projectDir;
     }
 
@@ -195,6 +212,257 @@ ipcMain.handle('get-statistics', async (event, sourceDir) => {
   });
 });
 
+// Export statistics to file
+ipcMain.handle('export-statistics', async (event, sourceDir, format) => {
+  return new Promise(async (resolve) => {
+    // Ask user where to save the file
+    const extensions = {
+      'html': { name: 'HTML Report', extensions: ['html'] },
+      'csv': { name: 'CSV Files', extensions: ['csv'] },
+      'pdf': { name: 'PDF Report', extensions: ['pdf'] },
+      'json': { name: 'JSON Data', extensions: ['json'] }
+    };
+    
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export Statistics Report',
+      defaultPath: `statistics_report.${format}`,
+      filters: [extensions[format] || { name: 'All Files', extensions: ['*'] }]
+    });
+    
+    if (result.canceled || !result.filePath) {
+      resolve({ success: false, error: 'Export cancelled' });
+      return;
+    }
+    
+    const outputPath = result.filePath;
+    const projectDir = path.join(__dirname, '..');
+    let cmd;
+    let args = [];
+    const env = { ...process.env };
+
+    if (app.isPackaged) {
+      cmd = path.join(process.resourcesPath, 'python_dist', process.platform === 'win32' ? 'python.exe' : 'python');
+      args = ['-m', 'src.statistics', '--source-dir', sourceDir, '--export', outputPath, '--format', format];
+      env.APP_RESOURCE_PATH = process.resourcesPath;
+    } else {
+      // Check both venv and .venv directories
+      const venvPath1 = path.join(projectDir, 'venv', 'bin', 'python3');
+      const venvPath2 = path.join(projectDir, '.venv', 'bin', 'python3');
+      const venvPython = fs.existsSync(venvPath1) ? venvPath1 : venvPath2;
+      cmd = fs.existsSync(venvPython) ? venvPython : 'python3';
+      args = ['-m', 'src.statistics', '--source-dir', sourceDir, '--export', outputPath, '--format', format];
+      env.APP_RESOURCE_PATH = projectDir;
+    }
+
+    const exportProcess = spawn(cmd, args, { cwd: projectDir, env });
+
+    let output = '';
+    let errorOutput = '';
+
+    exportProcess.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    exportProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+
+    exportProcess.on('close', (code) => {
+      if (code === 0) {
+        resolve({ success: true, path: outputPath, output });
+      } else {
+        resolve({ success: false, error: errorOutput || `Process exited with code ${code}` });
+      }
+    });
+
+    exportProcess.on('error', (err) => {
+      resolve({ success: false, error: err.message });
+    });
+  });
+});
+
+ipcMain.handle('export-markdown', async (event, config) => {
+  return new Promise((resolve) => {
+    const projectDir = path.join(__dirname, '..');
+    let cmd;
+    let args = [];
+    const env = { ...process.env };
+
+    const baseArgs = ['-m', 'src.markdown_exporter',
+      '--source-dir', config.SOURCE_DIR,
+      '--output-dir', config.OUTPUT_DIR,
+      '--table-image-width', String(config.TABLE_IMAGE_WIDTH || 400),
+      '--image-width', String(config.IMAGE_WIDTH || 600)
+    ];
+    
+    // Add format flag for standard markdown (obsidian/vscode compatible)
+    if (config.MD_FORMAT === 'obsidian') {
+      baseArgs.push('--standard-markdown');
+    }
+
+    if (app.isPackaged) {
+      cmd = path.join(process.resourcesPath, 'python_dist', process.platform === 'win32' ? 'python.exe' : 'python');
+      args = baseArgs;
+      env.APP_RESOURCE_PATH = process.resourcesPath;
+    } else {
+      // Dev: python -m src.markdown_exporter
+      const venvPath1 = path.join(projectDir, 'venv', 'bin', 'python3');
+      const venvPath2 = path.join(projectDir, '.venv', 'bin', 'python3');
+      const venvPython = fs.existsSync(venvPath1) ? venvPath1 : venvPath2;
+      cmd = fs.existsSync(venvPython) ? venvPython : 'python3';
+      args = baseArgs;
+      env.APP_RESOURCE_PATH = projectDir;
+    }
+
+    const exportProcess = spawn(cmd, args, { cwd: projectDir, env });
+
+    let output = '';
+    let errorOutput = '';
+
+    exportProcess.stdout.on('data', (data) => {
+      const text = data.toString();
+      output += text;
+      mainWindow.webContents.send('import-log', text);
+    });
+
+    exportProcess.stderr.on('data', (data) => {
+      const text = data.toString();
+      errorOutput += text;
+      mainWindow.webContents.send('import-log', text);
+    });
+
+    exportProcess.on('close', (code) => {
+      if (code === 0) {
+        resolve({ success: true, output });
+      } else {
+        resolve({ success: false, error: errorOutput || `Process exited with code ${code}`, output });
+      }
+    });
+
+    exportProcess.on('error', (err) => {
+      resolve({ success: false, error: err.message });
+    });
+  });
+});
+
+// Attachment Analyzer handlers
+ipcMain.handle('analyze-attachments', async (event, sourceDir) => {
+  return new Promise((resolve) => {
+    const projectDir = path.join(__dirname, '..');
+    const env = { ...process.env };
+    
+    let cmd;
+    if (app.isPackaged) {
+      cmd = path.join(process.resourcesPath, 'python_dist', process.platform === 'win32' ? 'python.exe' : 'python');
+      env.APP_RESOURCE_PATH = process.resourcesPath;
+    } else {
+      const venvPath1 = path.join(projectDir, 'venv', 'bin', 'python3');
+      const venvPath2 = path.join(projectDir, '.venv', 'bin', 'python3');
+      const venvPython = fs.existsSync(venvPath1) ? venvPath1 : venvPath2;
+      cmd = fs.existsSync(venvPython) ? venvPython : 'python3';
+      env.APP_RESOURCE_PATH = projectDir;
+    }
+
+    const args = ['-m', 'src.attachment_analyzer', '--source-dir', sourceDir, '--json'];
+    const proc = spawn(cmd, args, { cwd: projectDir, env });
+    
+    let output = '';
+    let errorOutput = '';
+
+    proc.stdout.on('data', (data) => { output += data.toString(); });
+    proc.stderr.on('data', (data) => { errorOutput += data.toString(); });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        try {
+          const result = JSON.parse(output);
+          resolve(result);
+        } catch (e) {
+          resolve({ success: false, error: 'Failed to parse analysis result' });
+        }
+      } else {
+        resolve({ success: false, error: errorOutput || `Process exited with code ${code}` });
+      }
+    });
+
+    proc.on('error', (err) => {
+      resolve({ success: false, error: err.message });
+    });
+  });
+});
+
+ipcMain.handle('convert-videos-to-mp3', async (event, config) => {
+  return new Promise((resolve) => {
+    const projectDir = path.join(__dirname, '..');
+    const env = { ...process.env };
+    
+    let cmd;
+    if (app.isPackaged) {
+      cmd = path.join(process.resourcesPath, 'python_dist', process.platform === 'win32' ? 'python.exe' : 'python');
+      env.APP_RESOURCE_PATH = process.resourcesPath;
+    } else {
+      const venvPath1 = path.join(projectDir, 'venv', 'bin', 'python3');
+      const venvPath2 = path.join(projectDir, '.venv', 'bin', 'python3');
+      const venvPython = fs.existsSync(venvPath1) ? venvPath1 : venvPath2;
+      cmd = fs.existsSync(venvPython) ? venvPython : 'python3';
+      env.APP_RESOURCE_PATH = projectDir;
+    }
+
+    const args = ['-m', 'src.attachment_analyzer', 
+      '--source-dir', config.sourceDir, 
+      '--convert-videos',
+      '--json'
+    ];
+    if (config.deleteOriginals) {
+      args.push('--delete-originals');
+    }
+
+    const proc = spawn(cmd, args, { cwd: projectDir, env });
+    
+    let output = '';
+    let errorOutput = '';
+
+    proc.stdout.on('data', (data) => { 
+      output += data.toString();
+      mainWindow.webContents.send('import-log', data.toString());
+    });
+    proc.stderr.on('data', (data) => { 
+      errorOutput += data.toString();
+      mainWindow.webContents.send('import-log', data.toString());
+    });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        try {
+          const result = JSON.parse(output);
+          resolve(result);
+        } catch (e) {
+          resolve({ success: true, message: output });
+        }
+      } else {
+        resolve({ success: false, error: errorOutput || `Process exited with code ${code}` });
+      }
+    });
+
+    proc.on('error', (err) => {
+      resolve({ success: false, error: err.message });
+    });
+  });
+});
+
+ipcMain.handle('delete-attachment', async (event, filePath) => {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      return { success: true, deleted: filePath };
+    } else {
+      return { success: false, error: 'File not found' };
+    }
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('start-import', async (event, config) => {
   return new Promise((resolve, reject) => {
     const projectDir = path.join(__dirname, '..');
@@ -216,7 +484,10 @@ ipcMain.handle('start-import', async (event, config) => {
       importProcess = spawn(cmd, args, { env });
     } else {
       // Dev: python -m src.importer
-      const venvPython = path.join(projectDir, '.venv', 'bin', 'python3');
+      // Check both venv and .venv directories
+      const venvPath1 = path.join(projectDir, 'venv', 'bin', 'python3');
+      const venvPath2 = path.join(projectDir, '.venv', 'bin', 'python3');
+      const venvPython = fs.existsSync(venvPath1) ? venvPath1 : venvPath2;
       const pythonCmd = fs.existsSync(venvPython) ? venvPython : 'python3';
       const pyArgs = ['-m', 'src.importer'];
       pyArgs.push('--run');
@@ -271,7 +542,10 @@ ipcMain.handle('retry-failed', async () => {
       env.APP_RESOURCE_PATH = process.resourcesPath;
     } else {
       // Dev: python -m python_tools.retry_failed
-      const venvPython = path.join(projectDir, '.venv', 'bin', 'python3');
+      // Check both venv and .venv directories
+      const venvPath1 = path.join(projectDir, 'venv', 'bin', 'python3');
+      const venvPath2 = path.join(projectDir, '.venv', 'bin', 'python3');
+      const venvPython = fs.existsSync(venvPath1) ? venvPath1 : venvPath2;
       const pythonCmd = fs.existsSync(venvPython) ? venvPython : 'python3';
       cmd = pythonCmd;
       args = [path.join(projectDir, 'python_tools', 'retry_failed.py')];
@@ -326,7 +600,10 @@ ipcMain.handle('cleanup-old-failures', async () => {
       cmd = path.join(process.resourcesPath, 'python_dist', 'cleanup_old_failures');
       env.APP_RESOURCE_PATH = process.resourcesPath;
     } else {
-      const venvPython = path.join(projectDir, '.venv', 'bin', 'python3');
+      // Check both venv and .venv directories
+      const venvPath1 = path.join(projectDir, 'venv', 'bin', 'python3');
+      const venvPath2 = path.join(projectDir, '.venv', 'bin', 'python3');
+      const venvPython = fs.existsSync(venvPath1) ? venvPath1 : venvPath2;
       const pythonCmd = fs.existsSync(venvPython) ? venvPython : 'python3';
       cmd = pythonCmd;
       args = [path.join(projectDir, 'python_tools', 'cleanup_old_failures.py')];
@@ -370,7 +647,10 @@ ipcMain.handle('get-parsing-errors', async (event, options = {}) => {
       cmd = path.join(process.resourcesPath, 'python_dist', 'query_errors');
       env.APP_RESOURCE_PATH = process.resourcesPath;
     } else {
-      const venvPython = path.join(projectDir, '.venv', 'bin', 'python3');
+      // Check both venv and .venv directories
+      const venvPath1 = path.join(projectDir, 'venv', 'bin', 'python3');
+      const venvPath2 = path.join(projectDir, '.venv', 'bin', 'python3');
+      const venvPython = fs.existsSync(venvPath1) ? venvPath1 : venvPath2;
       const pythonCmd = fs.existsSync(venvPython) ? venvPython : 'python3';
       cmd = pythonCmd;
       args = [path.join(projectDir, 'python_tools', 'query_errors.py')];
