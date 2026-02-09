@@ -1,6 +1,6 @@
 {
   "name": "honoka",
-  "version": "3.2.4",
+  "version": "3.2.5",
   "description": "Hierarchical object Notion organizer & Knowledge Analyzer",
   "main": "electron/main.js",
   "scripts": {
