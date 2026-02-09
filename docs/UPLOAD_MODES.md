@@ -10,79 +10,37 @@ The importer now supports **5 different image upload modes** to solve the 404 pr
 
 | Mode | Setup | Cost | Speed | Reliability | Auto-Cleanup | Best For |
 |------|-------|------|-------|-------------|--------------|----------|
-| **file.io** ⭐ | None | Free* | Medium | High | ✅ YES | **Most users** |
-| **Notion Native** | None | Free | Medium | Medium | ✅ YES | Experimental users |
-| **Tunnel** | Install CF | Free | Fast | Low | ❌ No | Quick tests only |
-| **AWS S3** | AWS account | $1-5/mo | Fast | Very High | ❌ No | Enterprise |
-| **Cloudflare R2** | CF account | $0.50/mo | Fast | Very High | ❌ No | Cost-conscious |
+| **Notion Native** | None | Free | Medium | Medium | ✅ YES | Corporate employee/ generla users without high permission|
+| **AWS S3** | AWS account | $1-5/mo | Fast | Very High | ✅ Yes | Ease of migratione |
+| **GCS** | Company GCP account | $?/mo | Fast | Very High | ✅ yes | Security-conscious |
 
-*Free tier: 100MB/file, limited uploads. Paid: $5/mo unlimited.
 
 ---
 
 ## Detailed Mode Explanations
 
-### 🔥 **file.io (RECOMMENDED)**
-
-**How it works:**
-```
-1. Upload image to file.io → Get URL
-2. Send URL to Notion
-3. Notion downloads image (FIRST download)
-4. file.io AUTO-DELETES image
-5. Notion has cached copy forever
-```
-
-**Pros:**
-- ✅ **Auto-cleanup!** Files delete after Notion downloads
-- ✅ No account needed (free tier works)
-- ✅ No 404 issues (URLs valid 14 days)
-- ✅ Privacy-friendly (auto-delete)
-- ✅ No storage costs long-term
-
-**Cons:**
-- 🟡 Rate limited (10-20 uploads/min free, unlimited paid)
-- 🟡 100 MB per file (free), 5GB (paid)
-- 🟡 Slower than tunnel (upload takes time)
-
-**When to use:**
-- ✅ Medium imports (10-500 pages)
-- ✅ Don't want permanent storage
-- ✅ Want simplest setup
-
-**Setup:**
-```
-1. Select "file.io" from dropdown
-2. (Optional) Add API key for paid tier
-3. Set expiry days (default 14)
-4. Done!
-```
 
 ---
 
-### 📦 **Notion Native (Experimental)**
+### 📦 **Notion Native (Default, need Notion token issued by company)**
 
 **How it works:**
 ```
-1. Upload to file.io (as bridge)
+1. Using Notion's offical fle uploading api
 2. Send URL to Notion as 'external' type
-3. Notion downloads and caches
-4. Notion CONVERTS from 'external' to 'file' type
-5. Image now Notion-hosted forever
-6. file.io auto-deletes
+3. Image is Notion-hosted forever
+
 ```
 
 **Pros:**
 - ✅ Images become 'file' type (not 'external')
-- ✅ Hosted by Notion permanently
-- ✅ No external dependencies after import
-- ✅ Auto-cleanup from file.io
+- ✅ Hosted by Notion permanently. No extra cost (unless you're moving awasy from Notion)
+- ✅ Safe, no need for external services & cdn temp exposure. 
 
 **Cons:**
-- ⚠️ **Experimental** - relies on Notion's auto-conversion
-- ⚠️ Not officially supported behavior
-- ⚠️ May not work for all image types
-- 🟡 Slower (upload + conversion time)
+- ⚠️ **Critical** - many domain knowledge spaces have important files > 20mb (qa / mobile feature demo videos, huge diagrams or slides, pdf)
+- ⚠️ Need apply for mercari notion token first, and it's only working in sandbox now 
+- 🟡 File size limitation (20mb) 
 
 **When to use:**
 - ✅ Want Notion-hosted images
@@ -92,52 +50,12 @@ The importer now supports **5 different image upload modes** to solve the 404 pr
 **Setup:**
 ```
 1. Select "Notion Native"
-2. Check "I understand this is experimental"
-3. (Optional) Add file.io API key
-4. Test with small batch first!
+2. Fill in Notion token and target Notino page id
 ```
 
 ---
 
-### 🌐 **Tunnel (Original Method)**
-
-**How it works:**
-```
-1. Start local Flask server
-2. Create cloudflared tunnel
-3. Serve images via tunnel URL
-4. Send tunnel URLs to Notion
-5. Keep tunnel alive X seconds
-6. Close tunnel
-⚠️ If Notion fetches after tunnel closes → 404!
-```
-
-**Pros:**
-- ✅ Fast (no upload needed)
-- ✅ Free (no accounts)
-- ✅ Works offline
-
-**Cons:**
-- ❌ **404 risk** if tunnel closes too early
-- ❌ Must babysit (keep app running)
-- ❌ Unreliable for large imports
-
-**When to use:**
-- ✅ Quick tests (1-5 pages)
-- ✅ Development/debugging
-- ❌ **NOT for production imports!**
-
-**Setup:**
-```
-1. Install cloudflared: brew install cloudflared
-2. Select "Tunnel"
-3. Set keepalive (recommend 1800s = 30min for safety)
-4. Keep app running during keepalive!
-```
-
----
-
-### ☁️ **AWS S3**
+### ☁️ **AWS S3 (security issues, disabled)**
 
 **How it works:**
 ```
@@ -184,153 +102,27 @@ Total: ~$0.10/month for typical import
 
 ---
 
-### ☁️ **Cloudflare R2**
-
-**How it works:**
-```
-Same as S3, but using Cloudflare R2 (S3-compatible)
-```
-
-**Pros:**
-- ✅ **Cheaper than S3** ($0.015/GB vs $0.023/GB)
-- ✅ **No egress fees** (S3 charges for downloads)
-- ✅ S3-compatible API (same code!)
-- ✅ Fast global CDN
-
-**Cons:**
-- 🟡 Requires Cloudflare account
-- 🟡 Requires custom domain setup
-- 🟡 Newer service (less mature)
-
-**When to use:**
-- ✅ Cost-conscious enterprise
-- ✅ Already use Cloudflare
-- ✅ Need permanent storage cheaper than S3
-
-**Setup:**
-```
-1. Create Cloudflare account
-2. Enable R2, create bucket
-3. Set up custom domain (images.yourdomain.com)
-4. Get API keys
-5. Enter in GUI
-```
-
-**Costs:**
-```
-500 images × 200KB = 100MB
-Storage: $0.015/GB/month = $0.0015/month
-Bandwidth: FREE (no egress fees!)
-Total: ~$0.05/month (3x cheaper than S3)
-```
-
----
-
-## Recommended Modes by Use Case
-
-### **Small Import (1-50 pages, <100 images):**
-```
-✅ file.io (free tier)
-   - No setup, auto-cleanup
-   - Perfect for testing
-```
-
-### **Medium Import (50-500 pages, 100-500 images):**
-```
-✅ file.io (paid tier $5/mo) 
-   OR
-✅ Notion Native (experimental)
-   - Both auto-cleanup
-   - file.io faster/more reliable
-   - Notion Native for permanent Notion hosting
-```
-
-### **Large Import (500-1000+ pages, 500+ images):**
-```
-✅ Cloudflare R2 (if cost-conscious)
-   OR
-✅ AWS S3 (if need max reliability)
-   - Permanent, reliable
-   - Can delete old imports manually
-   - Costs: $0.05-0.10/month
-```
-
-### **Quick Test/Debug:**
-```
-✅ Tunnel (with 1800s keepalive)
-   - Fastest for dev
-   - Don't use for production!
-```
-
----
-
 ## Feature Matrix
 
 ### **Auto-Delete After Use:**
-- ✅ file.io
-- ✅ Notion Native (via file.io bridge)
-- ❌ Tunnel (no storage)
-- ❌ S3 (manual delete)
-- ❌ Cloudflare (manual delete)
+- ✅ Notion Native (via Notion api)
+- ✅ S3 (usually set as 24hr for notion api to fetch)
+- ✅ GCS (usually set as 24hr for notion api to fetch)
 
 ### **No Account Needed:**
-- ✅ file.io (free tier)
 - ✅ Notion Native
-- ✅ Tunnel
-- ❌ S3
-- ❌ Cloudflare
+- ❌ AWS S3
+- ❌ GCP GCS
 
 ### **Permanent URLs:**
-- ⏱️ file.io (14 days or first download)
 - ✅ Notion Native (Notion-hosted)
-- ❌ Tunnel (expires in minutes)
-- ✅ S3
-- ✅ Cloudflare
+- ✅ S3 (Can be, but will not be used)
+- ✅ Cloudflare (Can be, but will not be used)
 
-### **No 404 Risk:**
-- ✅ file.io (if Notion downloads within 14 days - always does)
+### **No 404 Possibility:**
 - ✅ Notion Native
-- ❌ Tunnel (high risk)
-- ✅ S3
-- ✅ Cloudflare
-
----
-
-## GUI Quick Reference
-
-### **Mode Selector:**
-```
-🖼️ Image Upload Mode: [file.io ▼]
-
-[Config panel appears below based on selection]
-
-⚡ [✓] Use Async Verification (10x faster)
-```
-
-### **file.io Selected:**
-```
-┌─────────────────────────────────┐
-│ file.io Settings                │
-├─────────────────────────────────┤
-│ API Key: [Optional_______]      │
-│ Expiry:  [14] days              │
-│                                 │
-│ Files auto-delete after first   │
-│ download OR expiry              │
-└─────────────────────────────────┘
-```
-
-### **Notion Native Selected:**
-```
-┌─────────────────────────────────┐
-│ ⚠️ Notion Native (Experimental) │
-├─────────────────────────────────┤
-│ Uses file.io bridge             │
-│ Notion converts to 'file' type  │
-│                                 │
-│ [✓] I understand experimental   │
-└─────────────────────────────────┘
-```
+- ✅ S3 (temp public)
+- ✅ GCS (when temp public)
 
 ---
 
@@ -360,5 +152,5 @@ Config location: `~/.notion_importer/config.json`
 
 ---
 
-**For your 1000-page import, I recommend: file.io paid tier ($5/mo) or Cloudflare R2 ($0.50/mo)**
+**For over 1000-page import, recommend using cdn to save effort and time esp. if there're larger files **
 
