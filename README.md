@@ -1,9 +1,11 @@
-# Honoka v3 (Previously C2N: Confluence HTML → Notion)
-
+# Honoka v3 
+(Previously C2N: Confluence HTML → Notion)
 - Cross-platform: macOS + Linux
-- Images kept local; served via temporary tunnel during import (cloudflared → ngrok fallback)
+-- App Works on windows but haven't tested the file path and naming issues
+- Images and exported files kept local; served via Notion api during import (aws/gcs cdn approach was disabled)
 - Tables with images converted to Notion column_list/column; wrap rows >6 cells
 - Use HTML <title> as Notion page title
+- Option to strip off unwanted, repeated shown domain space name in title for each page. 
 
 ## GUI
 
