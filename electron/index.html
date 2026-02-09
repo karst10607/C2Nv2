@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Notion Importer</title>
+  <title>HonoKa</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -12,8 +12,8 @@
       <header>
         <div class="header-content">
           <div class="header-title">
-            <h1>Notion Importer</h1>
-            <p class="subtitle">Import Confluence HTML exports into Notion</p>
+            <h1>HonoKa</h1>
+            <p class="subtitle">Hierarchical object Notion organizer & Knowledge Analyzer</p>
           </div>
           <div class="header-actions">
             <button id="theme-toggle" class="theme-toggle" title="Toggle theme">
@@ -147,6 +147,14 @@
             <small>Max width for images inside tables</small>
           </div>
 
+          <div class="form-group checkbox-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="md-strip-space-prefix">
+              <span>Strip Space Name Prefix</span>
+            </label>
+            <small>Auto-detect and remove common Confluence space name from folder names</small>
+          </div>
+
           <div class="button-group">
             <button id="statistics-btn" class="btn-secondary">📊 Show Statistics</button>
             <button id="export-md-btn" class="btn-primary">📝 Export to Markdown</button>
@@ -215,21 +223,21 @@
             <label for="upload-mode">🖼️ Image Upload Mode</label>
             <select id="upload-mode">
               <option value="s3">☁️ S3 Auto-Delete (Auto-cleanup after 1 day) ⭐ RECOMMENDED</option>
-              <option value="notion_native">📦 Notion Native (S3 bridge, experimental)</option>
-              <option value="tunnel">🌐 Tunnel (Fast but may 404)</option>
-              <option value="cloudflare">☁️ Cloudflare R2 (Auto-delete, cheaper)</option>
+              <option value="notion_native">📦 Notion Native (Files hosted by Notion) ⭐ NEW</option>
+              <option value="gcs">☁️ GCS (Google Cloud Storage, auto-delete)</option>
               <option value="s3_permanent">☁️ S3 Permanent (Manual cleanup)</option>
             </select>
             <small id="mode-description" class="mode-help">Upload to S3 with lifecycle auto-delete after 1 day. Reliable and cheap (~$0.001).</small>
           </div>
 
-          <!-- Tunnel config -->
-          <div class="upload-config" id="tunnel-config" style="display:none;">
+          <!-- Notion Native config -->
+          <div class="upload-config" id="notion-native-config" style="display:none;">
             <div class="config-card">
-              <h3>Tunnel Settings</h3>
-              <label>Keepalive Duration (seconds)</label>
-              <input type="number" id="tunnel-keepalive" value="600" min="60" max="3600">
-              <small>How long to keep tunnel alive after import (600s = 10 min)</small>
+              <h3>📦 Notion Native Upload</h3>
+              <p><strong>How it works:</strong> Files are uploaded directly to Notion's storage via their API.</p>
+              <p><strong>Pros:</strong> Images permanently hosted by Notion. No external storage costs. No URL expiration.</p>
+              <p><strong>Cons:</strong> 20MB max per file. Requires Notion API token.</p>
+              <p class="success-text">✓ Uses your Notion token from settings above - no extra configuration needed!</p>
             </div>
           </div>
 
@@ -255,35 +263,42 @@
             </div>
           </div>
 
-          <!-- Cloudflare config -->
-          <div class="upload-config" id="cloudflare-config" style="display:none;">
+          <!-- GCS config -->
+          <div class="upload-config" id="gcs-config" style="display:none;">
             <div class="config-card">
-              <h3>Cloudflare R2 Settings</h3>
+              <h3>Google Cloud Storage Settings</h3>
               <label>Bucket Name</label>
-              <input type="text" id="cf-bucket" placeholder="notion-imports">
-              <label>Account ID</label>
-              <input type="text" id="cf-account-id" placeholder="abc123...">
-              <label>Access Key ID</label>
-              <input type="password" id="cf-access-key">
-              <label>Secret Access Key</label>
-              <input type="password" id="cf-secret-key">
-              <label>Public Domain (R2 custom domain)</label>
-              <input type="text" id="cf-public-domain" placeholder="images.yourdomain.com">
-            </div>
-          </div>
-
-          <!-- Notion Native config -->
-          <div class="upload-config" id="notion-config" style="display:none;">
-            <div class="config-card warning-card">
-              <h3>⚠️ Notion Native Upload (Experimental)</h3>
-              <p><strong>How it works:</strong> Uses S3 temp storage as a bridge → Notion downloads and (hopefully) converts to 'file' type → S3 auto-deletes after 1 day</p>
-              <p><strong>Pros:</strong> Images become Notion-hosted permanently (file type, not external)</p>
-              <p><strong>Cons:</strong> Experimental, requires AWS S3 account (same as S3 Auto-Delete mode)</p>
-              <p><strong>⚠️ Note:</strong> Uses the SAME S3 credentials as "S3 Auto-Delete" mode. Configure S3 settings above first!</p>
+              <input type="text" id="gcs-bucket" placeholder="notion-temp-images">
+              <label>Project ID</label>
+              <input type="text" id="gcs-project-id" placeholder="my-project-123">
+              
+              <!-- Auth mode toggle -->
               <label>
-                <input type="checkbox" id="notion-accept-risk">
-                I understand this is experimental and requires S3 account
+                <input type="checkbox" id="gcs-use-impersonation">
+                Use Impersonation (ADC + service account impersonation)
               </label>
+              <small>If enabled, uses Application Default Credentials to impersonate a service account (no JSON file needed)</small>
+              
+              <!-- Local signing mode (default) -->
+              <div id="gcs-local-signing-config">
+                <label>Service Account JSON Path</label>
+                <div class="input-with-button">
+                  <input type="text" id="gcs-credentials-path" placeholder="/path/to/service-account.json">
+                  <button id="gcs-browse-credentials" class="btn-secondary">Browse</button>
+                </div>
+                <small>Path to your service account JSON file (credentials never leave your machine)</small>
+              </div>
+              
+              <!-- Impersonation mode -->
+              <div id="gcs-impersonation-config" style="display:none;">
+                <label>Service Account Email to Impersonate</label>
+                <input type="text" id="gcs-impersonate-sa" placeholder="sa-name@project-id.iam.gserviceaccount.com">
+                <small>Your ADC identity needs <code>roles/iam.serviceAccountTokenCreator</code> on this SA</small>
+              </div>
+              
+              <label>Auto-delete after (days)</label>
+              <input type="number" id="gcs-lifecycle-days" value="1" min="1" max="30">
+              <small>⚠️ Must configure lifecycle rule in GCS console for auto-delete</small>
             </div>
           </div>
 

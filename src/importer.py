@@ -8,7 +8,7 @@ from rich import print
 
 from .config import AppConfig
 from .html_parser import parse_html_file
-from .transform import to_notion_blocks
+from .transform import to_notion_blocks, NOTION_NATIVE_URL_SCHEME
 from .notion_api import Notion
 from .database import ImportDatabase
 from .verification import ImageVerifier
@@ -36,13 +36,76 @@ def count_images_in_blocks(blocks: List[Dict[str, Any]]) -> int:
     return processor.count_images_in_blocks(blocks)
 
 
-def upload_media_in_blocks(blocks: List[Dict[str, Any]], strategy, source_dir: Path, context: Dict) -> List[Dict[str, Any]]:
+def _update_block_with_url(block: Dict[str, Any], media_type: str, url: str) -> None:
+    """
+    Update a media block with the uploaded URL.
+    Handles both external URLs and Notion native file_upload URLs.
+    """
+    if url.startswith(NOTION_NATIVE_URL_SCHEME):
+        # Notion native upload - change structure to file_upload
+        # Per Notion docs: {"type": "file_upload", "file_upload": {"id": "<uuid>"}}
+        file_upload_id = url[len(NOTION_NATIVE_URL_SCHEME):]
+        block[media_type] = {
+            "type": "file_upload",
+            "file_upload": {"id": file_upload_id}
+        }
+    else:
+        # External URL - keep external structure
+        block[media_type]['external']['url'] = url
+
+
+def _create_placeholder_block(media_type: str, filename: str, reason: str) -> Dict[str, Any]:
+    """
+    Create a placeholder callout block for failed/skipped media.
+    This prevents empty pages when media upload fails.
+    """
+    icon = "🖼️" if media_type == "image" else "📹" if media_type == "video" else "📎"
+    return {
+        "object": "block",
+        "type": "callout",
+        "callout": {
+            "icon": {"type": "emoji", "emoji": "⚠️"},
+            "color": "yellow_background",
+            "rich_text": [
+                {"type": "text", "text": {"content": f"{icon} {media_type.title()} not imported: "}},
+                {"type": "text", "text": {"content": filename}, "annotations": {"bold": True}},
+                {"type": "text", "text": {"content": f"\nReason: {reason}"}}
+            ]
+        }
+    }
+
+
+def _replace_block_with_placeholder(block: Dict[str, Any], media_type: str, filename: str, reason: str) -> None:
+    """Replace a media block in-place with a placeholder callout."""
+    placeholder = _create_placeholder_block(media_type, filename, reason)
+    block.clear()
+    block.update(placeholder)
+
+
+def upload_media_in_blocks(blocks: List[Dict[str, Any]], strategy, source_dir: Path, context: Dict,
+                           page_title: str = None) -> tuple:
     """
     Upload all media (images, videos, documents, etc.) using strategy and update URLs in blocks.
-    For S3/CDN strategies only (tunnel doesn't need this).
+    
+    Returns:
+        Tuple of (blocks, skipped_media_list) where skipped_media_list contains dicts with:
+        - file_path, filename, media_type, file_size_bytes, skip_reason, page_title
     """
     context['source_dir'] = source_dir
     failed_media = []
+    skipped_media = []  # Collect for later DB insertion
+    
+    def _track_skipped(file_path: str, filename: str, media_type: str, 
+                       file_size: int, skip_reason: str):
+        """Helper to collect skipped media info"""
+        skipped_media.append({
+            'file_path': file_path,
+            'filename': filename,
+            'media_type': media_type,
+            'file_size_bytes': file_size,
+            'skip_reason': skip_reason,
+            'page_title': page_title
+        })
     
     for block in blocks:
         # Handle images, videos, and files
@@ -66,19 +129,30 @@ def upload_media_in_blocks(blocks: List[Dict[str, Any]], strategy, source_dir: P
                 local_path = source_dir / relative_path
                 if local_path.exists():
                     try:
-                        # Upload and get CDN URL
+                        # Upload and get CDN URL or Notion file_upload URL
                         cdn_url = strategy.upload_image(local_path, context)
-                        # Update block with CDN URL
-                        if media_type == 'image':
-                            block['image']['external']['url'] = cdn_url
-                        elif media_type == 'video':
-                            block['video']['external']['url'] = cdn_url
-                        else:  # file
-                            block['file']['external']['url'] = cdn_url
+                        # Update block with URL (handles both external and file_upload)
+                        _update_block_with_url(block, media_type, cdn_url)
                     except Exception as e:
-                        print(f"  [red]Error: Failed to upload {local_path.name}: {e}[/red]")
+                        error_str = str(e)
+                        print(f"  [red]Error: Failed to upload {local_path.name}: {error_str}[/red]")
                         failed_media.append(str(local_path))
-                        # Keep the invalid URL so we can see the issue
+                        
+                        # Determine skip reason and track
+                        try:
+                            file_size = local_path.stat().st_size
+                        except:
+                            file_size = None
+                        
+                        if "20MB" in error_str or "size" in error_str.lower():
+                            reason = f"File exceeds 20MB limit ({file_size / 1024 / 1024:.1f} MB)" if file_size else "File exceeds size limit"
+                            _track_skipped(str(local_path), local_path.name, media_type, file_size, "exceeds_20mb")
+                        else:
+                            reason = error_str[:100]
+                            _track_skipped(str(local_path), local_path.name, media_type, file_size, "upload_failed")
+                        
+                        # Replace with placeholder to prevent empty page
+                        _replace_block_with_placeholder(block, media_type, local_path.name, reason)
                 else:
                     # Check if this is a placeholder or temporary file
                     from .image_utils import should_skip_image
@@ -86,9 +160,14 @@ def upload_media_in_blocks(blocks: List[Dict[str, Any]], strategy, source_dir: P
                     dummy_tag = BeautifulSoup().new_tag('img')
                     if should_skip_image(dummy_tag, current_url):
                         print(f"  [dim]Skipping temporary/placeholder: {current_url}[/dim]")
+                        # Replace with simple text note
+                        _replace_block_with_placeholder(block, media_type, current_url, "Placeholder/temp file skipped")
                     else:
                         print(f"  [red]Error: {media_type.capitalize()} not found: {local_path}[/red]")
                         failed_media.append(current_url)
+                        _track_skipped(str(local_path), relative_path, media_type, None, "file_not_found")
+                        # Replace with placeholder
+                        _replace_block_with_placeholder(block, media_type, relative_path, "File not found in export")
         
         elif block.get('type') == 'column_list':
             # Handle images and videos in column_list
@@ -110,15 +189,27 @@ def upload_media_in_blocks(blocks: List[Dict[str, Any]], strategy, source_dir: P
                             if local_path.exists():
                                 try:
                                     cdn_url = strategy.upload_image(local_path, context)
-                                    if media_type == 'image':
-                                        child['image']['external']['url'] = cdn_url
-                                    elif media_type == 'video':
-                                        child['video']['external']['url'] = cdn_url
-                                    else:  # file
-                                        child['file']['external']['url'] = cdn_url
+                                    # Update block with URL (handles both external and file_upload)
+                                    _update_block_with_url(child, media_type, cdn_url)
                                 except Exception as e:
-                                    print(f"  [red]Error: Failed to upload {local_path.name}: {e}[/red]")
+                                    error_str = str(e)
+                                    print(f"  [red]Error: Failed to upload {local_path.name}: {error_str}[/red]")
                                     failed_media.append(str(local_path))
+                                    
+                                    # Determine skip reason and track
+                                    try:
+                                        file_size = local_path.stat().st_size
+                                    except:
+                                        file_size = None
+                                    
+                                    if "20MB" in error_str or "size" in error_str.lower():
+                                        reason = f"File exceeds 20MB limit ({file_size / 1024 / 1024:.1f} MB)" if file_size else "File exceeds size limit"
+                                        _track_skipped(str(local_path), local_path.name, media_type, file_size, "exceeds_20mb")
+                                    else:
+                                        reason = error_str[:100]
+                                        _track_skipped(str(local_path), local_path.name, media_type, file_size, "upload_failed")
+                                    
+                                    _replace_block_with_placeholder(child, media_type, local_path.name, reason)
                             else:
                                 # Check if this is a placeholder or temporary file
                                 from .image_utils import should_skip_image
@@ -126,9 +217,12 @@ def upload_media_in_blocks(blocks: List[Dict[str, Any]], strategy, source_dir: P
                                 dummy_tag = BeautifulSoup().new_tag('img')
                                 if should_skip_image(dummy_tag, current_url):
                                     print(f"  [dim]Skipping temporary/placeholder: {current_url}[/dim]")
+                                    _replace_block_with_placeholder(child, media_type, current_url, "Placeholder/temp file skipped")
                                 else:
                                     print(f"  [red]Error: {media_type.capitalize()} not found: {local_path}[/red]")
                                     failed_media.append(current_url)
+                                    _track_skipped(str(local_path), relative_path, media_type, None, "file_not_found")
+                                    _replace_block_with_placeholder(child, media_type, relative_path, "File not found in export")
     
     if failed_media:
         from .models.errors import UploadError, ErrorCode, get_error_message
@@ -162,7 +256,7 @@ def upload_media_in_blocks(blocks: List[Dict[str, Any]], strategy, source_dir: P
         print(f"\n[yellow]{get_error_message(ErrorCode.WARN_MISSING_MEDIA_SKIPPED)}[/yellow]")
         print(f"[dim]Continuing with {placeholder_count} placeholders and {actual_missing} missing files[/dim]")
     
-    return blocks
+    return blocks, skipped_media
 
 
 # Removed: verify_images_loaded() - now in verification.py as ImageVerifier.verify_page_images()
@@ -263,19 +357,29 @@ def main(argv: Optional[list] = None):
     total_images = 0
     page_stats = []
     parsing_failures = []  # Track files that failed to parse/transform
+    all_skipped_media = []  # Collect skipped media for DB tracking
+    total_unused_attachments = 0  # Track skipped unused attachments
     import_start_time = time.time()
     
     for f in html_files:
         try:
             ast = parse_html_file(f)
             
-            # For S3/CDN strategies, upload images now and get URLs
-            # For tunnel, public URL is already set
+            # Track attachment filtering stats
+            attachment_stats = ast.get('attachment_stats', {})
+            total_unused_attachments += attachment_stats.get('unused_skipped', 0)
+            
+            # Collect unused/orphaned attachments for skipped media tracking
+            unused_details = attachment_stats.get('unused_details', [])
+            for unused in unused_details:
+                unused['page_title'] = ast['title']
+                all_skipped_media.append(unused)
+            
+            # Set image base URL if provided by strategy
             if public:
-                # Tunnel strategy - use base URL
                 image_base_url = public
             else:
-                # S3/CDN strategy - will upload per-image
+                # S3/GCS strategy - will upload per-image
                 image_base_url = ""  # Will be replaced during transform
             
             blocks = to_notion_blocks(
@@ -290,7 +394,11 @@ def main(argv: Optional[list] = None):
             
             # For S3/CDN strategies, upload media and update URLs in blocks
             if not public:
-                blocks = upload_media_in_blocks(blocks, upload_strategy, Path(source_dir), {})
+                blocks, skipped = upload_media_in_blocks(
+                    blocks, upload_strategy, Path(source_dir), {},
+                    page_title=ast['title']
+                )
+                all_skipped_media.extend(skipped)
             
             image_count = count_images_in_blocks(blocks)
             total_blocks += len(blocks)
@@ -302,7 +410,8 @@ def main(argv: Optional[list] = None):
                 'ast': ast,
                 'blocks': blocks,
                 'image_count': image_count,
-                'metadata': ast.get('metadata', {})
+                'metadata': ast.get('metadata', {}),
+                'attachment_stats': attachment_stats
             })
         except Exception as e:
             # Capture error details for later review
@@ -334,6 +443,20 @@ def main(argv: Optional[list] = None):
     except:
         app_version = '2.6.0'
     run_id = db.start_import_run(app_version, len(html_files), total_images)
+    
+    # Save all skipped media to database
+    if all_skipped_media:
+        for sm in all_skipped_media:
+            db.add_skipped_media(
+                run_id=run_id,
+                file_path=sm['file_path'],
+                filename=sm['filename'],
+                media_type=sm['media_type'],
+                file_size_bytes=sm.get('file_size_bytes'),
+                skip_reason=sm['skip_reason'],
+                page_title=sm.get('page_title')
+            )
+        print(f"[yellow]Tracked {len(all_skipped_media)} skipped media file(s) in database[/yellow]")
     
     # Track pages with failed images
     failed_pages = []
@@ -482,6 +605,38 @@ def main(argv: Optional[list] = None):
         if len(failed_pages) > MAX_FAILED_PAGES_DISPLAY:
             print(f"[yellow]  ... and {len(failed_pages) - MAX_FAILED_PAGES_DISPLAY} more[/yellow]")
     
+    # Export skipped media summary
+    if all_skipped_media:
+        skipped_media_path = Path(__file__).resolve().parents[1] / 'out' / f'skipped_media_run{run_id}.json'
+        db.export_skipped_media_to_json(skipped_media_path, run_id)
+        
+        # Also save a "latest" copy
+        latest_skipped_path = Path(__file__).resolve().parents[1] / 'out' / 'skipped_media_latest.json'
+        db.export_skipped_media_to_json(latest_skipped_path, run_id)
+        
+        # Get summary stats
+        summary = db.get_skipped_media_summary(run_id)
+        
+        print(f"\n[yellow]═══ Skipped Media Summary ═══[/yellow]")
+        print(f"[yellow]Total skipped: {summary['total_count']} file(s)[/yellow]")
+        if summary.get('orphan_count', 0) > 0:
+            print(f"[dim]  - Unused/orphan files: {summary['orphan_count']}[/dim]")
+        if summary['oversized_count'] > 0:
+            print(f"[yellow]  - Exceeds 20MB limit: {summary['oversized_count']}[/yellow]")
+        if summary['missing_count'] > 0:
+            print(f"[yellow]  - File not found: {summary['missing_count']}[/yellow]")
+        if summary['failed_count'] > 0:
+            print(f"[yellow]  - Upload failed: {summary['failed_count']}[/yellow]")
+        
+        if summary['total_bytes'] and summary['total_bytes'] > 0:
+            total_mb = summary['total_bytes'] / (1024 * 1024)
+            print(f"[yellow]  Total size: {total_mb:.1f} MB[/yellow]")
+        if summary['largest_file_bytes'] and summary['largest_file_bytes'] > 0:
+            largest_mb = summary['largest_file_bytes'] / (1024 * 1024)
+            print(f"[yellow]  Largest file: {largest_mb:.1f} MB[/yellow]")
+        
+        print(f"\n[yellow]Details saved to: {skipped_media_path}[/yellow]")
+    
     # Cleanup upload strategy (keepalive if needed, or just cleanup)
     upload_strategy.cleanup(failed_count=len(failed_pages))
     
@@ -496,6 +651,8 @@ def main(argv: Optional[list] = None):
         print(f"[green]✓ Import Complete[/green]")
         print(f"  Pages:  {success_pages}/{total_pages} successful")
         print(f"  Images: {verified_image_count}/{total_images} verified")
+        if total_unused_attachments > 0:
+            print(f"[dim]  Skipped: {total_unused_attachments} unused attachment(s) not in content[/dim]")
         if parsing_failures:
             print(f"[red]  {len(parsing_failures)} page(s) failed to parse/convert[/red]")
         if failed_pages:

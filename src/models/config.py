@@ -8,7 +8,6 @@ from typing import Optional, Dict, Any
 from pathlib import Path
 
 from ..constants import (
-    DEFAULT_TUNNEL_KEEPALIVE,
     S3_DEFAULT_LIFECYCLE_DAYS,
     MAX_COLUMNS_PER_ROW,
     MIN_COLUMN_HEIGHT
@@ -18,22 +17,21 @@ from .errors import ConfigurationError, ErrorCode
 
 class UploadMode(Enum):
     """Available upload strategies"""
-    TUNNEL = "tunnel"
     S3_TEMP = "s3_temp"
     S3_PERMANENT = "s3_permanent"
-    CLOUDFLARE = "cloudflare"
+    GCS = "gcs"
     NOTION_NATIVE = "notion_native"
     
     @classmethod
     def from_string(cls, value: str) -> 'UploadMode':
-        """Convert string to UploadMode, with fallback to TUNNEL"""
+        """Convert string to UploadMode, with fallback to S3_TEMP"""
         try:
             # Handle s3 as alias for s3_temp
             if value == "s3":
                 return cls.S3_TEMP
             return cls(value.lower())
         except (ValueError, AttributeError):
-            return cls.TUNNEL
+            return cls.S3_TEMP
 
 
 @dataclass
@@ -85,27 +83,6 @@ class BaseConfig:
 
 
 @dataclass
-class TunnelConfig:
-    """Configuration for tunnel upload strategy"""
-    keepalive_sec: int = DEFAULT_TUNNEL_KEEPALIVE
-    
-    def validate(self) -> None:
-        """Validate tunnel configuration"""
-        if self.keepalive_sec < 60:
-            raise ConfigurationError(
-                ErrorCode.CONFIG_INVALID_TUNNEL,
-                "Tunnel keepalive must be at least 60 seconds",
-                f"Current value: {self.keepalive_sec}s"
-            )
-        if self.keepalive_sec > 3600:
-            raise ConfigurationError(
-                ErrorCode.CONFIG_INVALID_TUNNEL,
-                "Tunnel keepalive cannot exceed 1 hour (3600 seconds)",
-                f"Current value: {self.keepalive_sec}s"
-            )
-
-
-@dataclass
 class S3Config:
     """Configuration for S3 upload strategies"""
     bucket: str = ""
@@ -143,52 +120,72 @@ class S3Config:
 
 
 @dataclass
-class CloudflareConfig:
-    """Configuration for Cloudflare R2 upload strategy"""
+class GCSConfig:
+    """Configuration for Google Cloud Storage upload strategy"""
     bucket: str = ""
-    account_id: str = ""
-    access_key: str = ""
-    secret_key: str = ""
-    public_domain: str = ""
+    project_id: str = ""
+    credentials_path: str = ""  # Path to service account JSON file (for local signing)
+    lifecycle_days: int = 1
+    # Impersonation mode - uses ADC + service account impersonation instead of local JSON
+    use_impersonation: bool = False
+    impersonate_service_account: str = ""  # SA email to impersonate (e.g., "sa@project.iam.gserviceaccount.com")
     
     def validate(self) -> None:
-        """Validate Cloudflare configuration"""
+        """Validate GCS configuration"""
         missing = []
         if not self.bucket:
             missing.append("bucket")
-        if not self.account_id:
-            missing.append("account_id")
-        if not self.access_key:
-            missing.append("access_key")
-        if not self.secret_key:
-            missing.append("secret_key")
-        if not self.public_domain:
-            missing.append("public_domain")
+        if not self.project_id:
+            missing.append("project_id")
+        
+        # Validate based on mode
+        if self.use_impersonation:
+            # Impersonation mode: need service account email
+            if not self.impersonate_service_account:
+                missing.append("impersonate_service_account (SA email to impersonate)")
+        else:
+            # Local signing mode: need credentials file
+            if not self.credentials_path:
+                missing.append("credentials_path (service account JSON)")
         
         if missing:
             raise ConfigurationError(
-                ErrorCode.CONFIG_MISSING_CF,
-                "Cloudflare configuration incomplete",
+                ErrorCode.CONFIG_MISSING_GCS,
+                "GCS configuration incomplete",
                 f"Missing fields: {', '.join(missing)}"
+            )
+        
+        # Check if credentials file exists (only for local signing mode)
+        from pathlib import Path
+        if not self.use_impersonation and self.credentials_path and not Path(self.credentials_path).exists():
+            raise ConfigurationError(
+                ErrorCode.CONFIG_INVALID_GCS,
+                "GCS credentials file not found",
+                f"Path: {self.credentials_path}"
             )
 
 
 @dataclass
 class StrategyConfig:
     """Combined configuration for upload strategies"""
-    upload_mode: UploadMode = UploadMode.TUNNEL
-    tunnel: TunnelConfig = field(default_factory=TunnelConfig)
+    upload_mode: UploadMode = UploadMode.S3_TEMP
     s3: S3Config = field(default_factory=S3Config)
-    cloudflare: CloudflareConfig = field(default_factory=CloudflareConfig)
+    gcs: GCSConfig = field(default_factory=GCSConfig)
+    notion_token: str = ""  # For NOTION_NATIVE mode
     
     def validate(self) -> None:
         """Validate strategy configuration based on upload mode"""
-        if self.upload_mode == UploadMode.TUNNEL:
-            self.tunnel.validate()
-        elif self.upload_mode in (UploadMode.S3_TEMP, UploadMode.S3_PERMANENT, UploadMode.NOTION_NATIVE):
+        if self.upload_mode in (UploadMode.S3_TEMP, UploadMode.S3_PERMANENT):
             self.s3.validate()
-        elif self.upload_mode == UploadMode.CLOUDFLARE:
-            self.cloudflare.validate()
+        elif self.upload_mode == UploadMode.GCS:
+            self.gcs.validate()
+        elif self.upload_mode == UploadMode.NOTION_NATIVE:
+            if not self.notion_token:
+                raise ConfigurationError(
+                    ErrorCode.CONFIG_MISSING_TOKEN,
+                    "Notion token is required for native upload",
+                    "Set via GUI or NOTION_TOKEN environment variable"
+                )
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'StrategyConfig':
@@ -199,10 +196,6 @@ class StrategyConfig:
         if 'upload_mode' in data:
             config.upload_mode = UploadMode.from_string(data['upload_mode'])
         
-        # Parse tunnel config
-        if 'tunnel_keepalive_sec' in data:
-            config.tunnel.keepalive_sec = int(data['tunnel_keepalive_sec'])
-        
         # Parse S3 config
         s3_fields = ['s3_bucket', 's3_region', 's3_access_key', 's3_secret_key', 
                      's3_lifecycle_days', 's3_use_presigned']
@@ -211,13 +204,14 @@ class StrategyConfig:
                 attr_name = field.replace('s3_', '')
                 setattr(config.s3, attr_name, data[field])
         
-        # Parse Cloudflare config
-        cf_fields = ['cf_bucket', 'cf_account_id', 'cf_access_key', 
-                     'cf_secret_key', 'cf_public_domain']
-        for field in cf_fields:
+        # Parse GCS config
+        gcs_fields = ['gcs_bucket', 'gcs_project_id', 'gcs_credentials_path', 
+                      'gcs_lifecycle_days', 'gcs_use_impersonation', 
+                      'gcs_impersonate_service_account']
+        for field in gcs_fields:
             if field in data:
-                attr_name = field.replace('cf_', '')
-                setattr(config.cloudflare, attr_name, data[field])
+                attr_name = field.replace('gcs_', '')
+                setattr(config.gcs, attr_name, data[field])
         
         return config
 
@@ -281,8 +275,8 @@ class ImportConfig:
                 if not attr.startswith('_'):
                     try:
                         value = getattr(app_config, attr)
-                        if attr in ['upload_mode', 'tunnel_keepalive_sec'] or \
-                           attr.startswith('s3_') or attr.startswith('cf_'):
+                        if attr == 'upload_mode' or \
+                           attr.startswith('s3_') or attr.startswith('gcs_'):
                             strategy_dict[attr] = value
                     except AttributeError:
                         pass
@@ -290,11 +284,15 @@ class ImportConfig:
             # IMPORTANT: Also check _extra_attrs where dynamic config values are stored
             if hasattr(app_config, '_extra_attrs') and app_config._extra_attrs:
                 for key, value in app_config._extra_attrs.items():
-                    if key in ['upload_mode', 'tunnel_keepalive_sec'] or \
-                       key.startswith('s3_') or key.startswith('cf_'):
+                    if key == 'upload_mode' or \
+                       key.startswith('s3_') or key.startswith('gcs_'):
                         strategy_dict[key] = value
             
             import_config.strategy = StrategyConfig.from_dict(strategy_dict)
+            
+            # For NOTION_NATIVE mode, pass the notion_token to strategy
+            if import_config.strategy.upload_mode == UploadMode.NOTION_NATIVE:
+                import_config.strategy.notion_token = import_config.base.notion_token
             
             return import_config
         except Exception as e:

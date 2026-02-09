@@ -168,6 +168,11 @@ def extract_rich_text(element: Union[Tag, str], base_url: str = "", parent_style
                     rich_text_parts.append(obj)
                     
         elif isinstance(node, Tag):
+            # Skip style and script tags entirely - Confluence embeds these inline
+            # and they contain CSS/JS that shouldn't be treated as text content
+            if node.name in ('style', 'script', 'noscript'):
+                return
+            
             # Handle links
             if node.name == 'a' and node.get('href'):
                 href = node.get('href', '')

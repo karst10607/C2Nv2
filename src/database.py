@@ -108,6 +108,27 @@ class ImportDatabase:
                 CREATE INDEX IF NOT EXISTS idx_parsing_errors_run 
                 ON parsing_errors(run_id)
             ''')
+            
+            # Skipped media table - tracks files that were skipped due to size limits, missing files, etc.
+            self.conn.execute('''
+                CREATE TABLE IF NOT EXISTS skipped_media (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER,
+                    file_path TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    media_type TEXT NOT NULL,
+                    file_size_bytes INTEGER,
+                    skip_reason TEXT NOT NULL,
+                    page_title TEXT,
+                    timestamp TEXT NOT NULL,
+                    FOREIGN KEY (run_id) REFERENCES import_runs(id)
+                )
+            ''')
+            
+            self.conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_skipped_media_run 
+                ON skipped_media(run_id)
+            ''')
     
     def start_import_run(self, version: str, total_pages: int, total_images: int) -> int:
         """Record the start of an import run, return run_id"""
@@ -463,6 +484,102 @@ class ImportDatabase:
             ''')
         
         return [dict(row) for row in cursor.fetchall()]
+    
+    def add_skipped_media(self, run_id: int, file_path: str, filename: str,
+                          media_type: str, file_size_bytes: Optional[int],
+                          skip_reason: str, page_title: Optional[str] = None):
+        """
+        Record a skipped media file.
+        
+        Args:
+            run_id: The import run ID
+            file_path: Full path to the media file
+            filename: Just the filename for display
+            media_type: 'image', 'video', or 'file'
+            file_size_bytes: File size in bytes (None if file not found)
+            skip_reason: Why it was skipped (e.g., 'exceeds_20mb', 'file_not_found', 'upload_failed')
+            page_title: Title of the page containing this media (optional)
+        """
+        with self.conn:
+            self.conn.execute('''
+                INSERT INTO skipped_media 
+                (run_id, file_path, filename, media_type, file_size_bytes, skip_reason, page_title, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (run_id, file_path, filename, media_type, file_size_bytes,
+                  skip_reason, page_title, datetime.now().isoformat()))
+    
+    def get_skipped_media(self, run_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Get skipped media files, optionally filtered by run_id.
+        
+        Args:
+            run_id: Optional run ID to filter by. If None, returns all.
+            
+        Returns:
+            List of skipped media records as dicts
+        """
+        if run_id is not None:
+            cursor = self.conn.execute('''
+                SELECT * FROM skipped_media 
+                WHERE run_id = ? 
+                ORDER BY file_size_bytes DESC NULLS LAST
+            ''', (run_id,))
+        else:
+            cursor = self.conn.execute('''
+                SELECT * FROM skipped_media 
+                ORDER BY run_id DESC, file_size_bytes DESC NULLS LAST
+            ''')
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def get_skipped_media_summary(self, run_id: int) -> Dict[str, Any]:
+        """
+        Get summary of skipped media for a run.
+        
+        Returns:
+            Dict with counts by reason and total size
+        """
+        cursor = self.conn.execute('''
+            SELECT 
+                COUNT(*) as total_count,
+                SUM(CASE WHEN skip_reason = 'exceeds_20mb' THEN 1 ELSE 0 END) as oversized_count,
+                SUM(CASE WHEN skip_reason = 'file_not_found' THEN 1 ELSE 0 END) as missing_count,
+                SUM(CASE WHEN skip_reason = 'upload_failed' THEN 1 ELSE 0 END) as failed_count,
+                SUM(CASE WHEN skip_reason = 'unused_orphan' THEN 1 ELSE 0 END) as orphan_count,
+                SUM(CASE WHEN file_size_bytes IS NOT NULL THEN file_size_bytes ELSE 0 END) as total_bytes,
+                MAX(file_size_bytes) as largest_file_bytes,
+                COUNT(CASE WHEN media_type = 'image' THEN 1 END) as image_count,
+                COUNT(CASE WHEN media_type = 'video' THEN 1 END) as video_count,
+                COUNT(CASE WHEN media_type = 'file' THEN 1 END) as file_count
+            FROM skipped_media
+            WHERE run_id = ?
+        ''', (run_id,))
+        
+        row = cursor.fetchone()
+        return dict(row) if row else {
+            'total_count': 0, 'oversized_count': 0, 'missing_count': 0,
+            'failed_count': 0, 'orphan_count': 0, 'total_bytes': 0, 'largest_file_bytes': 0,
+            'image_count': 0, 'video_count': 0, 'file_count': 0
+        }
+    
+    def export_skipped_media_to_json(self, output_path: Path, run_id: Optional[int] = None):
+        """
+        Export skipped media to JSON for easy review.
+        
+        Args:
+            output_path: Path to write JSON file
+            run_id: Optional run ID to filter by
+        """
+        media = self.get_skipped_media(run_id)
+        
+        # Add human-readable size
+        for item in media:
+            if item.get('file_size_bytes'):
+                size_mb = item['file_size_bytes'] / (1024 * 1024)
+                item['file_size_mb'] = round(size_mb, 2)
+        
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(media, f, indent=2, ensure_ascii=False, default=str)
     
     def close(self):
         """Close database connection"""

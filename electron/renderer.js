@@ -18,6 +18,7 @@ const logOutput = document.getElementById('log-output');
 const exportMdBtn = document.getElementById('export-md-btn');
 const mdImageWidthInput = document.getElementById('md-image-width');
 const mdTableImageWidthInput = document.getElementById('md-table-image-width');
+const mdStripSpacePrefixCheckbox = document.getElementById('md-strip-space-prefix');
 const imageWidthGroup = document.getElementById('image-width-group');
 const tableImageWidthGroup = document.getElementById('table-image-width-group');
 
@@ -71,11 +72,9 @@ const stopBtn = document.getElementById('stop-btn');
 // Upload mode elements
 const uploadModeSelect = document.getElementById('upload-mode');
 const modeDescription = document.getElementById('mode-description');
-const fileioConfig = document.getElementById('fileio-config');
-const tunnelConfig = document.getElementById('tunnel-config');
 const s3Config = document.getElementById('s3-config');
-const cloudflareConfig = document.getElementById('cloudflare-config');
-const notionConfig = document.getElementById('notion-config');
+const gcsConfig = document.getElementById('gcs-config');
+const notionNativeConfig = document.getElementById('notion-native-config');
 
 // Summary elements
 const summarySection = document.getElementById('summary-section');
@@ -140,18 +139,16 @@ uploadModeSelect.addEventListener('change', () => {
   const mode = uploadModeSelect.value;
   
   // Hide all config sections  
-  tunnelConfig.style.display = 'none';
   s3Config.style.display = 'none';
-  cloudflareConfig.style.display = 'none';
-  notionConfig.style.display = 'none';
+  if (gcsConfig) gcsConfig.style.display = 'none';
+  if (notionNativeConfig) notionNativeConfig.style.display = 'none';
   
   // Show relevant config
   const configMap = {
     's3': s3Config,
     's3_permanent': s3Config,
-    'tunnel': tunnelConfig,
-    'cloudflare': cloudflareConfig,
-    'notion_native': notionConfig
+    'gcs': gcsConfig,
+    'notion_native': notionNativeConfig
   };
   
   if (configMap[mode]) {
@@ -161,10 +158,9 @@ uploadModeSelect.addEventListener('change', () => {
   // Update description
   const descriptions = {
     's3': '☁️ Upload to S3 temp storage. AUTO-DELETES after 1 day via lifecycle rule. Reliable! (~$0.001 cost)',
-    'notion_native': '📦 Uses S3 temp bridge. Notion converts to "file" type. Auto-deletes after 1 day. Experimental.',
-    'tunnel': '🌐 Fast local serving. May cause 404s if tunnel closes too early. For quick tests only.',
+    'gcs': '☁️ Upload to Google Cloud Storage. AUTO-DELETES via lifecycle rule.',
     's3_permanent': '☁️ Permanent S3 storage. Manual cleanup needed. Costs ~$1-5/month ongoing.',
-    'cloudflare': '☁️ Cloudflare R2 with lifecycle auto-delete. 3x cheaper than S3. Requires custom domain.'
+    'notion_native': '📦 Files uploaded directly to Notion. Permanently hosted. No external storage needed!'
   };
   
   modeDescription.textContent = descriptions[mode] || '';
@@ -193,6 +189,7 @@ uploadModeSelect.addEventListener('change', () => {
   // Load markdown export settings
   if (mdImageWidthInput) mdImageWidthInput.value = currentConfig.MD_IMAGE_WIDTH || 600;
   if (mdTableImageWidthInput) mdTableImageWidthInput.value = currentConfig.MD_TABLE_IMAGE_WIDTH || 400;
+  if (mdStripSpacePrefixCheckbox) mdStripSpacePrefixCheckbox.checked = currentConfig.MD_STRIP_SPACE_PREFIX || false;
   
   // Load upload mode settings
   uploadModeSelect.value = currentConfig.UPLOAD_MODE || 's3';
@@ -269,6 +266,32 @@ if (browseBtnNotion) {
   });
 }
 
+// Browse GCS credentials file
+const gcsBrowseCredentialsBtn = document.getElementById('gcs-browse-credentials');
+if (gcsBrowseCredentialsBtn) {
+  gcsBrowseCredentialsBtn.addEventListener('click', async () => {
+    const file = await electronAPI.browseFile?.({ 
+      filters: [{ name: 'JSON Files', extensions: ['json'] }] 
+    });
+    if (file) {
+      document.getElementById('gcs-credentials-path').value = file;
+    }
+  });
+}
+
+// Toggle GCS impersonation mode
+const gcsUseImpersonationCheckbox = document.getElementById('gcs-use-impersonation');
+const gcsLocalSigningConfig = document.getElementById('gcs-local-signing-config');
+const gcsImpersonationConfig = document.getElementById('gcs-impersonation-config');
+
+if (gcsUseImpersonationCheckbox) {
+  gcsUseImpersonationCheckbox.addEventListener('change', () => {
+    const useImpersonation = gcsUseImpersonationCheckbox.checked;
+    if (gcsLocalSigningConfig) gcsLocalSigningConfig.style.display = useImpersonation ? 'none' : 'block';
+    if (gcsImpersonationConfig) gcsImpersonationConfig.style.display = useImpersonation ? 'block' : 'none';
+  });
+}
+
 // Save config
 saveBtn.addEventListener('click', async () => {
   const uploadMode = uploadModeSelect.value;
@@ -289,15 +312,12 @@ saveBtn.addEventListener('click', async () => {
     SKIP_VERIFICATION: document.getElementById('skip-verification').checked,
     // Markdown export settings
     MD_IMAGE_WIDTH: parseInt(mdImageWidthInput?.value) || 600,
-    MD_TABLE_IMAGE_WIDTH: parseInt(mdTableImageWidthInput?.value) || 400
+    MD_TABLE_IMAGE_WIDTH: parseInt(mdTableImageWidthInput?.value) || 400,
+    MD_STRIP_SPACE_PREFIX: mdStripSpacePrefixCheckbox?.checked || false
   };
   
   // Add mode-specific settings
-  if (uploadMode === 'tunnel') {
-    config.TUNNEL_KEEPALIVE_SEC = parseInt(document.getElementById('tunnel-keepalive')?.value) || 600;
-  }
-  
-  if (uploadMode === 's3' || uploadMode === 's3_permanent' || uploadMode === 'notion_native') {
+  if (uploadMode === 's3' || uploadMode === 's3_permanent') {
     config.S3_BUCKET = document.getElementById('s3-bucket')?.value || '';
     config.S3_REGION = document.getElementById('s3-region')?.value || 'us-west-2';
     config.S3_ACCESS_KEY = document.getElementById('s3-access-key')?.value || '';
@@ -306,12 +326,13 @@ saveBtn.addEventListener('click', async () => {
     config.S3_LIFECYCLE_DAYS = parseInt(document.getElementById('s3-lifecycle-days')?.value) || 1;
   }
   
-  if (uploadMode === 'cloudflare') {
-    config.CF_BUCKET = document.getElementById('cf-bucket')?.value || '';
-    config.CF_ACCOUNT_ID = document.getElementById('cf-account-id')?.value || '';
-    config.CF_ACCESS_KEY = document.getElementById('cf-access-key')?.value || '';
-    config.CF_SECRET_KEY = document.getElementById('cf-secret-key')?.value || '';
-    config.CF_PUBLIC_DOMAIN = document.getElementById('cf-public-domain')?.value || '';
+  if (uploadMode === 'gcs') {
+    config.GCS_BUCKET = document.getElementById('gcs-bucket')?.value || '';
+    config.GCS_PROJECT_ID = document.getElementById('gcs-project-id')?.value || '';
+    config.GCS_USE_IMPERSONATION = document.getElementById('gcs-use-impersonation')?.checked || false;
+    config.GCS_IMPERSONATE_SERVICE_ACCOUNT = document.getElementById('gcs-impersonate-sa')?.value || '';
+    config.GCS_CREDENTIALS_PATH = document.getElementById('gcs-credentials-path')?.value || '';
+    config.GCS_LIFECYCLE_DAYS = parseInt(document.getElementById('gcs-lifecycle-days')?.value) || 1;
   }
 
   const result = await electronAPI.saveConfig(config);
@@ -762,6 +783,7 @@ async function runMarkdownExport(sourceDir, outputDir) {
   const mdFormat = getSelectedMdFormat();
   const imageWidth = parseInt(mdImageWidthInput?.value) || 600;
   const tableImageWidth = parseInt(mdTableImageWidthInput?.value) || 400;
+  const stripSpacePrefix = mdStripSpacePrefixCheckbox?.checked || false;
 
   const formatLabel = mdFormat === 'github' ? 'GitHub Flavored' : 'Standard Markdown (Obsidian/VS Code)';
   appendLog(`Starting Markdown export (${formatLabel})...\n`);
@@ -770,6 +792,9 @@ async function runMarkdownExport(sourceDir, outputDir) {
   if (mdFormat === 'github') {
     appendLog(`Image width: ${imageWidth}px, Table image width: ${tableImageWidth}px\n`);
   }
+  if (stripSpacePrefix) {
+    appendLog(`Auto-detect and strip space prefix: enabled\n`);
+  }
   appendLog('\n');
 
   const config = {
@@ -777,7 +802,8 @@ async function runMarkdownExport(sourceDir, outputDir) {
     OUTPUT_DIR: outputDir,
     TABLE_IMAGE_WIDTH: tableImageWidth,
     IMAGE_WIDTH: imageWidth,
-    MD_FORMAT: mdFormat
+    MD_FORMAT: mdFormat,
+    STRIP_SPACE_PREFIX: stripSpacePrefix
   };
 
   const result = await electronAPI.exportMarkdown(config);

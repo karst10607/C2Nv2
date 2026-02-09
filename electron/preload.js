@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveConfig: (config) => ipcRenderer.invoke('save-config', config),
   browseFolder: () => ipcRenderer.invoke('browse-folder'),
   browseSaveFolder: () => ipcRenderer.invoke('browse-save-folder'),
+  browseFile: (options) => ipcRenderer.invoke('browse-file', options),
   testConnection: (token) => ipcRenderer.invoke('test-connection', token),
   getStatistics: (sourceDir) => ipcRenderer.invoke('get-statistics', sourceDir),
   exportStatistics: (sourceDir, format) => ipcRenderer.invoke('export-statistics', sourceDir, format),

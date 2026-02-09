@@ -6,6 +6,101 @@ import re
 from .constants import NOTION_TEXT_LIMIT, MAX_COLUMNS_PER_ROW, MIN_COLUMN_HEIGHT, NOTION_TABLE_ROW_LIMIT
 from .image_utils import is_table_icon, extract_image_src
 from .models.errors import ErrorCode, get_error_message
+from .rich_text_parser import split_rich_text_by_length
+
+# URL scheme for Notion native file uploads
+NOTION_NATIVE_URL_SCHEME = "notion-file-upload://"
+
+
+def sanitize_rich_text(rich_text_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Ensure all rich_text segments are within Notion's 2000 character limit.
+    
+    Notion API rejects any rich_text segment where text.content > 2000 characters.
+    This function splits oversized segments while preserving formatting and links.
+    """
+    if not rich_text_list:
+        return rich_text_list
+    return split_rich_text_by_length(rich_text_list, NOTION_TEXT_LIMIT)
+
+
+def sanitize_block_rich_text(block: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Recursively sanitize all rich_text fields in a block and its children.
+    
+    This ensures no rich_text segment exceeds Notion's 2000 char limit.
+    """
+    if not isinstance(block, dict):
+        return block
+    
+    block_type = block.get('type')
+    
+    # List of block types that have rich_text directly
+    rich_text_block_types = [
+        'paragraph', 'heading_1', 'heading_2', 'heading_3',
+        'bulleted_list_item', 'numbered_list_item', 'to_do',
+        'toggle', 'callout', 'quote', 'code'
+    ]
+    
+    # Sanitize rich_text in the block itself
+    if block_type in rich_text_block_types:
+        block_content = block.get(block_type, {})
+        if 'rich_text' in block_content:
+            block_content['rich_text'] = sanitize_rich_text(block_content['rich_text'])
+    
+    # Handle table rows specially - cells are arrays of rich_text
+    if block_type == 'table_row':
+        cells = block.get('table_row', {}).get('cells', [])
+        for i, cell in enumerate(cells):
+            if isinstance(cell, list):
+                cells[i] = sanitize_rich_text(cell)
+    
+    # Recursively process children
+    if 'children' in block:
+        block['children'] = [sanitize_block_rich_text(child) for child in block['children']]
+    
+    return block
+
+
+def create_media_block(block_type: str, url: str, caption: List[Dict] = None) -> Dict[str, Any]:
+    """
+    Create a Notion media block (image, video, file) with correct type.
+    
+    Handles both external URLs and Notion native file uploads.
+    If URL starts with 'notion-file-upload://', uses file_upload type.
+    Otherwise uses external type.
+    
+    Args:
+        block_type: 'image', 'video', or 'file'
+        url: The URL or notion-file-upload://id
+        caption: Optional rich_text caption (only for file blocks)
+    
+    Returns:
+        Notion block dictionary
+    """
+    if url.startswith(NOTION_NATIVE_URL_SCHEME):
+        # Notion native upload - extract file_upload ID
+        file_upload_id = url[len(NOTION_NATIVE_URL_SCHEME):]
+        media_obj = {
+            "type": "file_upload",
+            "file_upload": {"id": file_upload_id}
+        }
+    else:
+        # External URL
+        media_obj = {
+            "type": "external",
+            "external": {"url": url}
+        }
+    
+    # Add caption for file blocks
+    if block_type == "file" and caption:
+        media_obj["caption"] = caption
+    
+    return {
+        "object": "block",
+        "type": block_type,
+        block_type: media_obj
+    }
 
 
 def create_metadata_callout(metadata: Dict[str, Optional[str]]) -> Optional[Dict[str, Any]]:
@@ -669,9 +764,9 @@ def to_notion_blocks(ast: Dict[str, Any], image_base_url: str, max_cols: int = M
             blocks.append({"object":"block","type":"code","code":{"rich_text": rich_text(text), "language":"plain text"}})
         elif t == 'image':
             url = b.get('src','')
-            if url and not url.startswith(('http://','https://')):
+            if url and not url.startswith(('http://','https://', NOTION_NATIVE_URL_SCHEME)):
                 url = image_base_url.rstrip('/') + '/' + url.lstrip('/')
-            blocks.append({"object":"block","type":"image","image":{"type":"external","external":{"url": url}}})
+            blocks.append(create_media_block('image', url))
         elif t == 'drawio':
             # Handle Draw.io diagrams
             attachment_path = b.get('attachment_path')
@@ -679,14 +774,7 @@ def to_notion_blocks(ast: Dict[str, Any], image_base_url: str, max_cols: int = M
                 # Only create image block if it's already a PNG
                 if attachment_path.endswith('.png'):
                     url = image_base_url.rstrip('/') + '/' + attachment_path.lstrip('/')
-                    blocks.append({
-                        "object": "block",
-                        "type": "image",
-                        "image": {
-                            "type": "external",
-                            "external": {"url": url}
-                        }
-                    })
+                    blocks.append(create_media_block('image', url))
                     # Add caption
                     diagram_name = b.get('diagram_name') or b.get('attachment_id', 'Unknown')
                     blocks.append({
@@ -722,7 +810,7 @@ def to_notion_blocks(ast: Dict[str, Any], image_base_url: str, max_cols: int = M
         elif t == 'file':
             # Handle file attachments (PDFs, docs, etc.)
             url = b.get('src','')
-            if url and not url.startswith(('http://','https://')):
+            if url and not url.startswith(('http://','https://', NOTION_NATIVE_URL_SCHEME)):
                 # Relative URL - prepend base URL
                 url = image_base_url.rstrip('/') + '/' + url.lstrip('/')
             
@@ -747,16 +835,7 @@ def to_notion_blocks(ast: Dict[str, Any], image_base_url: str, max_cols: int = M
                 })
                 continue
                 
-            # Notion file blocks require external URLs
-            blocks.append({
-                "object":"block",
-                "type":"file",
-                "file":{
-                    "type":"external",
-                    "external":{"url": url},
-                    "caption": rich_text(file_name)
-                }
-            })
+            blocks.append(create_media_block('file', url, rich_text(file_name)))
         elif t == 'table':
             # Smart table rendering - analyze content first
             if smart_table_rendering:
@@ -880,6 +959,10 @@ def to_notion_blocks(ast: Dict[str, Any], image_base_url: str, max_cols: int = M
                             "type": "divider",
                             "divider": {}
                         })
+    
+    # Sanitize all rich_text to ensure no segment exceeds Notion's 2000 char limit
+    blocks = [sanitize_block_rich_text(block) for block in blocks]
+    
     return blocks
 
 def _cell_children(children: List[Dict[str, Any]], image_base_url: str, is_header: bool = False) -> List[Dict[str, Any]]:
@@ -946,18 +1029,17 @@ def _cell_children(children: List[Dict[str, Any]], image_base_url: str, is_heade
             out.append({"object":"block","type":"code","code":{"rich_text": rich_text(text), "language":"plain text"}})
         elif t == 'image':
             url = ch.get('src','')
-            if url and not url.startswith(('http://','https://')):
+            if url and not url.startswith(('http://','https://', NOTION_NATIVE_URL_SCHEME)):
                 url = image_base_url.rstrip('/') + '/' + url.lstrip('/')
-            out.append({"object":"block","type":"image","image":{"type":"external","external":{"url": url}}})
+            out.append(create_media_block('image', url))
         elif t == 'video':
             url = ch.get('src','')
-            if url and not url.startswith(('http://','https://')):
+            if url and not url.startswith(('http://','https://', NOTION_NATIVE_URL_SCHEME)):
                 url = image_base_url.rstrip('/') + '/' + url.lstrip('/')
-            # Notion video blocks require external URLs
-            out.append({"object":"block","type":"video","video":{"type":"external","external":{"url": url}}})
+            out.append(create_media_block('video', url))
         elif t == 'file':
             url = ch.get('src','')
-            if url and not url.startswith(('http://','https://')):
+            if url and not url.startswith(('http://','https://', NOTION_NATIVE_URL_SCHEME)):
                 url = image_base_url.rstrip('/') + '/' + url.lstrip('/')
             file_name = ch.get('name', 'Attachment')
             
@@ -980,16 +1062,7 @@ def _cell_children(children: List[Dict[str, Any]], image_base_url: str, is_heade
                 })
                 continue
                 
-            # Notion file blocks require external URLs
-            out.append({
-                "object":"block",
-                "type":"file",
-                "file":{
-                    "type":"external",
-                    "external":{"url": url},
-                    "caption": rich_text(file_name)
-                }
-            })
+            out.append(create_media_block('file', url, rich_text(file_name)))
     if not out:
         out.append({"object":"block","type":"paragraph","paragraph":{"rich_text": rich_text("")}})
     return out

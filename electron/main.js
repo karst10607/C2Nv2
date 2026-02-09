@@ -21,7 +21,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js')
     },
     icon: path.join(__dirname, 'icon.png'),
-    title: 'Notion Importer'
+    title: 'HonoKa'
   });
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
@@ -100,6 +100,23 @@ ipcMain.handle('browse-save-folder', async () => {
     properties: ['openDirectory', 'createDirectory'],
     title: 'Select Output Folder for Markdown Export'
   });
+  if (!result.canceled && result.filePaths.length > 0) {
+    return result.filePaths[0];
+  }
+  return null;
+});
+
+ipcMain.handle('browse-file', async (event, options = {}) => {
+  const dialogOptions = {
+    properties: ['openFile'],
+    title: options.title || 'Select File'
+  };
+  
+  if (options.filters) {
+    dialogOptions.filters = options.filters;
+  }
+  
+  const result = await dialog.showOpenDialog(mainWindow, dialogOptions);
   if (!result.canceled && result.filePaths.length > 0) {
     return result.filePaths[0];
   }
@@ -299,6 +316,11 @@ ipcMain.handle('export-markdown', async (event, config) => {
     if (config.MD_FORMAT === 'obsidian') {
       baseArgs.push('--standard-markdown');
     }
+    
+    // Add auto space prefix stripping option
+    if (config.STRIP_SPACE_PREFIX) {
+      baseArgs.push('--strip-space-prefix');
+    }
 
     if (app.isPackaged) {
       cmd = path.join(process.resourcesPath, 'python_dist', process.platform === 'win32' ? 'python.exe' : 'python');
@@ -489,6 +511,9 @@ ipcMain.handle('start-import', async (event, config) => {
       const venvPath2 = path.join(projectDir, '.venv', 'bin', 'python3');
       const venvPython = fs.existsSync(venvPath1) ? venvPath1 : venvPath2;
       const pythonCmd = fs.existsSync(venvPython) ? venvPython : 'python3';
+      console.log('Import using Python:', pythonCmd);
+      console.log('venvPath1 exists:', fs.existsSync(venvPath1), venvPath1);
+      console.log('venvPath2 exists:', fs.existsSync(venvPath2), venvPath2);
       const pyArgs = ['-m', 'src.importer'];
       pyArgs.push('--run');
       if (config.SOURCE_DIR) { pyArgs.push('--source-dir', config.SOURCE_DIR); }

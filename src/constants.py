@@ -20,8 +20,6 @@ IMAGE_TIMEOUT_BASE = 10  # Base timeout for images
 IMAGE_TIMEOUT_PER_IMAGE = 8  # Additional seconds per image
 
 # Upload Strategies
-DEFAULT_TUNNEL_KEEPALIVE = 600  # Default tunnel keepalive time (10 minutes)
-TUNNEL_KEEPALIVE_PER_FAILED_PAGE = 30  # Extra keepalive seconds per failed page
 S3_PRESIGNED_URL_EXPIRY = 3600  # S3 presigned URL expiry time (1 hour)
 S3_DEFAULT_LIFECYCLE_DAYS = 1  # Default S3 lifecycle for temp files
 
@@ -43,16 +41,6 @@ DEFAULT_RECENT_RUNS_LIMIT = 10  # Default limit for recent import runs query
 # HTML Parsing
 MAX_COLUMNS_PER_ROW = 6  # Maximum columns per row in tables
 MIN_COLUMN_HEIGHT = 3  # Minimum blocks per column for table layout
-
-# Tunnel Connection
-TUNNEL_STARTUP_TIMEOUT = 10  # Timeout for tunnel startup (seconds)
-TUNNEL_DNS_TIMEOUT = 15  # Timeout for tunnel DNS resolution (seconds)
-NGROK_API_TIMEOUT = 1  # Timeout for ngrok API calls (seconds)
-NGROK_POLL_INTERVAL = 0.5  # Polling interval for ngrok URL (seconds)
-CLOUDFLARED_POLL_INTERVAL = 0.2  # Polling interval for cloudflared output (seconds)
-DNS_RESOLVE_INTERVAL = 1  # Interval between DNS resolution attempts (seconds)
-HTTP_CHECK_TIMEOUT = 3  # Timeout for HTTP accessibility check (seconds)
-HTTP_CHECK_INTERVAL = 1  # Interval between HTTP checks (seconds)
 
 # Time Formatting
 SECONDS_PER_MINUTE = 60  # Seconds in a minute for time display

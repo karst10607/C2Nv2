@@ -1,7 +1,7 @@
 {
-  "name": "notion-importer",
-  "version": "3.2.1",
-  "description": "Import Confluence HTML exports into Notion",
+  "name": "honoka",
+  "version": "3.2.3",
+  "description": "Hierarchical object Notion organizer & Knowledge Analyzer",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
@@ -22,7 +22,7 @@
   },
   "build": {
     "appId": "com.notionimporter.app",
-    "productName": "Notion Importer",
+    "productName": "HonoKa",
     "directories": {
       "output": "dist"
     },

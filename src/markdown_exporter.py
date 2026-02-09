@@ -33,6 +33,96 @@ DEFAULT_IMAGE_WIDTH = 600
 MAX_FOLDER_NAME_LENGTH = 100
 
 
+def detect_space_prefix(titles: List[str]) -> Optional[str]:
+    """
+    Detect the most common Confluence space name prefix from a list of page titles.
+    
+    Confluence exports typically have titles like:
+    - "Engineering Portal - Page Title"
+    - "Engineering Portal - Another Page"
+    
+    This function finds the common prefix before the separator.
+    
+    Args:
+        titles: List of page titles from HTML files
+    
+    Returns:
+        The detected space name prefix, or None if no common prefix found
+    """
+    if not titles or len(titles) < 2:
+        return None
+    
+    # Common separators used between space name and page title
+    separators = [' - ', ' – ', ' — ', ': ']
+    
+    # Extract potential prefixes (text before separator)
+    prefix_counts: Dict[str, int] = {}
+    
+    for title in titles:
+        for sep in separators:
+            if sep in title:
+                prefix = title.split(sep, 1)[0].strip()
+                if prefix and len(prefix) > 2:  # Ignore very short prefixes
+                    prefix_counts[prefix] = prefix_counts.get(prefix, 0) + 1
+                break  # Only count first matching separator
+    
+    if not prefix_counts:
+        return None
+    
+    # Find the most common prefix
+    most_common = max(prefix_counts.items(), key=lambda x: x[1])
+    prefix, count = most_common
+    
+    # Only return if the prefix appears in at least 50% of titles
+    # and appears more than once
+    if count >= 2 and count >= len(titles) * 0.5:
+        return prefix
+    
+    return None
+
+
+def strip_space_prefix(title: str, space_name: str) -> str:
+    """
+    Strip Confluence space name prefix from page title.
+    
+    Confluence exports often include the space name in the title, e.g.:
+    - "Engineering Portal - Page Title" (with separator)
+    - "Engineering Portal Page Title" (without separator)
+    
+    Args:
+        title: The full page title from Confluence
+        space_name: The space name to strip (e.g., "Engineering Portal")
+    
+    Returns:
+        Title with space prefix removed
+    """
+    if not title or not space_name:
+        return title
+    
+    # Normalize both for comparison
+    title_normalized = title.strip()
+    space_normalized = space_name.strip()
+    
+    # Try common separators: " - ", " – ", " — ", ": "
+    separators = [' - ', ' – ', ' — ', ': ', ' : ']
+    for sep in separators:
+        prefix = space_normalized + sep
+        if title_normalized.startswith(prefix):
+            return title_normalized[len(prefix):].strip()
+    
+    # Try direct prefix (no separator, just space name at the start)
+    if title_normalized.lower().startswith(space_normalized.lower()):
+        remaining = title_normalized[len(space_normalized):].strip()
+        # Only strip if there's something left after the space name
+        if remaining:
+            # Remove leading separator characters if present
+            remaining = remaining.lstrip('-–—: ')
+            if remaining:
+                return remaining
+    
+    return title
+
+
 def sanitize_folder_name(title: str) -> str:
     """
     Sanitize a page title for use as a folder name.
@@ -126,6 +216,69 @@ def escape_markdown(text: str) -> str:
     return text
 
 
+# Color to emoji circle mapping for table cells
+COLOR_EMOJI_MAP = {
+    'red': '🔴',
+    'green': '🟢',
+    'blue': '🔵',
+    'yellow': '🟡',
+    'orange': '🟠',
+    'purple': '🟣',
+    'gray': '⚪',
+    'grey': '⚪',
+}
+
+
+def panel_to_markdown(block: Dict[str, Any]) -> str:
+    """
+    Convert a panel (info/warning/tip/note) block to Markdown blockquote.
+    
+    Args:
+        block: Panel block with panel_type, icon, title, text
+        
+    Returns:
+        Markdown blockquote string
+    """
+    panel_type = block.get('panel_type', 'info')
+    icon = block.get('icon', 'ℹ️')
+    title = block.get('title', '')
+    text = block.get('text', '')
+    
+    # Build the blockquote
+    lines = []
+    
+    # First line with icon and optional title
+    if title:
+        lines.append(f"> {icon} **{title}**")
+    else:
+        # Use panel type as header
+        type_labels = {
+            'info': 'Info',
+            'warning': 'Warning',
+            'tip': 'Tip',
+            'note': 'Note'
+        }
+        label = type_labels.get(panel_type, 'Note')
+        lines.append(f"> {icon} **{label}**")
+    
+    # Add empty line for spacing
+    lines.append(">")
+    
+    # Add body text as blockquote lines
+    if text:
+        # Remove the title from text if it's at the beginning
+        body = text
+        if title and body.startswith(f"**{title}**"):
+            body = body[len(f"**{title}**"):].strip()
+        elif title and body.startswith(title):
+            body = body[len(title):].strip()
+        
+        for line in body.split('\n'):
+            lines.append(f"> {line}")
+    
+    return '\n'.join(lines)
+
+
 def ast_to_github_markdown(
     ast: Dict[str, Any],
     assets_dir: str = 'assets',
@@ -211,6 +364,9 @@ def block_to_markdown(
         if block.get('rich_text'):
             text = rich_text_to_markdown(block['rich_text'])
         return f"{indent}{text}"
+    
+    elif block_type == 'panel':
+        return panel_to_markdown(block)
     
     elif block_type == 'code':
         text = block.get('text', '')
@@ -388,12 +544,26 @@ def table_to_gfm(block: Dict[str, Any]) -> str:
     
     for row_idx, row in enumerate(rows):
         cells = row.get('cells', [])
+        is_header_row = row.get('is_header_row', False) or row_idx == 0
         cell_texts = []
         
         for cell in cells:
             text = extract_cell_text_md(cell)
             # Escape pipe characters
             text = text.replace('|', '\\|').replace('\n', ' ')
+            
+            # Add color circle for cells with background color
+            bg_color = cell.get('bg_color')
+            if bg_color and bg_color in COLOR_EMOJI_MAP:
+                text = f"{COLOR_EMOJI_MAP[bg_color]} {text}"
+            
+            # Make header cells bold (heading row or heading column)
+            is_header_cell = cell.get('is_header', False)
+            if (is_header_row or is_header_cell) and text.strip():
+                # Don't double-bold if already bold
+                if not text.strip().startswith('**'):
+                    text = f"**{text.strip()}**"
+            
             cell_texts.append(text)
         
         # Pad to max columns
@@ -425,12 +595,26 @@ def table_to_gfm_with_images(block: Dict[str, Any], assets_dir: str) -> str:
     
     for row_idx, row in enumerate(rows):
         cells = row.get('cells', [])
+        is_header_row = row.get('is_header_row', False) or row_idx == 0
         cell_texts = []
         
         for cell in cells:
             text = extract_cell_content_standard_md(cell, assets_dir)
             # Escape pipe characters but preserve markdown image syntax
             text = text.replace('\n', ' ').strip()
+            
+            # Add color circle for cells with background color
+            bg_color = cell.get('bg_color')
+            if bg_color and bg_color in COLOR_EMOJI_MAP:
+                text = f"{COLOR_EMOJI_MAP[bg_color]} {text}"
+            
+            # Make header cells bold (heading row or heading column)
+            is_header_cell = cell.get('is_header', False)
+            if (is_header_row or is_header_cell) and text.strip():
+                # Don't double-bold if already bold
+                if not text.strip().startswith('**'):
+                    text = f"**{text.strip()}**"
+            
             cell_texts.append(text)
         
         # Pad to max columns
@@ -537,7 +721,8 @@ def table_to_html(
         lines.append('  <tr>')
         
         for cell in cells:
-            tag = 'th' if is_header or cell.get('is_header', False) else 'td'
+            is_header_cell = is_header or cell.get('is_header', False)
+            tag = 'th' if is_header_cell else 'td'
             colspan = cell.get('colspan', 1)
             rowspan = cell.get('rowspan', 1)
             
@@ -550,6 +735,16 @@ def table_to_html(
             attr_str = ' ' + ' '.join(attrs) if attrs else ''
             
             cell_content = cell_to_html(cell, assets_dir, image_width)
+            
+            # Add color circle for cells with background color
+            bg_color = cell.get('bg_color')
+            if bg_color and bg_color in COLOR_EMOJI_MAP:
+                cell_content = f"{COLOR_EMOJI_MAP[bg_color]} {cell_content}"
+            
+            # Make header cells bold
+            if is_header_cell and cell_content.strip():
+                cell_content = f"<strong>{cell_content}</strong>"
+            
             lines.append(f'    <{tag}{attr_str}>{cell_content}</{tag}>')
         
         lines.append('  </tr>')
@@ -724,7 +919,8 @@ def export_to_markdown(
     assets_dir_name: str = 'assets',
     per_page_assets: bool = True,
     nested_folders: bool = True,
-    use_standard_markdown: bool = False
+    use_standard_markdown: bool = False,
+    auto_strip_space_prefix: bool = False
 ) -> Dict[str, Any]:
     """
     Export all HTML files from source directory to GitHub Markdown.
@@ -739,6 +935,8 @@ def export_to_markdown(
         nested_folders: If True, use nested folder structure with page titles (recommended)
         use_standard_markdown: If True, use standard Markdown syntax for all images
                                (Obsidian/VS Code compatible, no size control)
+        auto_strip_space_prefix: If True, auto-detect and strip common Confluence space name
+                                  prefix from folder names (e.g., "Engineering Portal - ")
     
     Returns:
         Dict with export statistics
@@ -769,10 +967,33 @@ def export_to_markdown(
     
     if nested_folders:
         print("Using nested folder structure (PageTitle/README.md)")
+        
+        # Auto-detect space prefix if enabled
+        detected_space_name = None
+        if auto_strip_space_prefix:
+            print("Detecting common space prefix...")
+            # Quick pass to extract titles for prefix detection
+            titles = []
+            for html_file in html_files:
+                try:
+                    from bs4 import BeautifulSoup
+                    html = html_file.read_text(encoding='utf-8', errors='ignore')
+                    soup = BeautifulSoup(html, 'lxml')
+                    if soup.title and soup.title.string:
+                        titles.append(soup.title.string.strip())
+                except:
+                    pass
+            
+            detected_space_name = detect_space_prefix(titles)
+            if detected_space_name:
+                print(f"Detected space prefix: '{detected_space_name}' - will be stripped from folder names")
+            else:
+                print("No common space prefix detected")
+        
         return _export_nested(
             html_files, output_path, stats,
             table_image_width, image_width,
-            use_standard_markdown
+            use_standard_markdown, detected_space_name
         )
     else:
         print("Using flat structure")
@@ -790,7 +1011,8 @@ def _export_nested(
     stats: Dict[str, Any],
     table_image_width: int,
     image_width: int,
-    use_standard_markdown: bool = False
+    use_standard_markdown: bool = False,
+    space_name: Optional[str] = None
 ) -> Dict[str, Any]:
     """Export using nested folder structure with page titles."""
     
@@ -805,6 +1027,11 @@ def _export_nested(
             
             # Get page title and create sanitized folder name
             page_title = ast.get('title', html_file.stem)
+            
+            # Strip space name prefix if provided
+            if space_name:
+                page_title = strip_space_prefix(page_title, space_name)
+            
             folder_name = sanitize_folder_name(page_title)
             folder_name = get_unique_folder_name(folder_name, used_folder_names)
             used_folder_names.add(folder_name)
@@ -1012,6 +1239,11 @@ def main():
         help='Use standard Markdown for all images (Obsidian/VS Code compatible, no size control)'
     )
     parser.add_argument(
+        '--strip-space-prefix',
+        action='store_true',
+        help='Auto-detect and strip common Confluence space name prefix from folder names'
+    )
+    parser.add_argument(
         '--json',
         action='store_true',
         help='Output results as JSON'
@@ -1027,7 +1259,8 @@ def main():
         assets_dir_name=args.assets_dir,
         per_page_assets=not args.shared_assets,
         nested_folders=not args.flat,  # Default is nested
-        use_standard_markdown=args.standard_markdown  # Obsidian/VS Code compatible
+        use_standard_markdown=args.standard_markdown,  # Obsidian/VS Code compatible
+        auto_strip_space_prefix=args.strip_space_prefix  # Auto-detect and strip space prefix
     )
     
     if args.json:

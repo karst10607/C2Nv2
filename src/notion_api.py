@@ -4,9 +4,13 @@ from notion_client import Client
 
 from .constants import NOTION_API_RATE_LIMIT, NOTION_BLOCK_CHUNK_SIZE, NOTION_API_BLOCK_LIMIT, API_RETRY_COUNT, RETRY_BASE_DELAY
 
+# Notion API version - 2025-09-03 required for file_upload type in blocks
+NOTION_API_VERSION = "2025-09-03"
+
 class Notion:
     def __init__(self, token: str):
-        self.client = Client(auth=token)
+        # Specify API version to support file_upload type in blocks
+        self.client = Client(auth=token, notion_version=NOTION_API_VERSION)
         self.last_api_call = 0
         self.min_interval = NOTION_API_RATE_LIMIT
 
@@ -36,6 +40,11 @@ class Notion:
 
     def append_blocks(self, page_id: str, blocks: List[Dict[str, Any]], chunk: int = NOTION_BLOCK_CHUNK_SIZE):
         """Append blocks to a page, handling nested structures and API limits"""
+        import json
+        
+        # Maximum payload size (Notion limit is ~1MB, use 500KB for safety margin)
+        MAX_PAYLOAD_SIZE = 500 * 1024  # 500KB
+        
         # Count actual blocks including nested ones
         actual_block_count = self._count_all_blocks(blocks)
         
@@ -44,21 +53,43 @@ class Notion:
             # For pages with many nested blocks, use smaller chunks
             chunk = min(chunk, 20)
         
-        for i in range(0, len(blocks), chunk):
-            part = blocks[i:i+chunk]
-            part_count = self._count_all_blocks(part)
+        # Build chunks based on both count AND payload size
+        current_chunk = []
+        current_size = 0
+        
+        for block in blocks:
+            block_size = len(json.dumps(block))
             
-            # If even a single chunk exceeds limits, we need to split it further
-            if part_count > 900:
-                print(f"  [yellow]Chunk has {part_count} blocks. Splitting further...[/yellow]")
-                # Process each block individually if needed
-                for block in part:
-                    single_count = self._count_all_blocks([block])
-                    if single_count > 900:
-                        print(f"  [red]Single block has {single_count} nested blocks! This may fail.[/red]")
-                    self._retry(lambda b=block: self.client.blocks.children.append(block_id=page_id, children=[b]))
-            else:
-                self._retry(lambda p=part: self.client.blocks.children.append(block_id=page_id, children=p))
+            # If single block exceeds limit, send it alone
+            if block_size > MAX_PAYLOAD_SIZE:
+                # First, flush current chunk if any
+                if current_chunk:
+                    self._retry(lambda p=current_chunk: self.client.blocks.children.append(block_id=page_id, children=p))
+                    current_chunk = []
+                    current_size = 0
+                
+                # Send oversized block alone (may still fail, but try)
+                print(f"  [yellow]Large block ({block_size/1024:.0f}KB) - sending individually[/yellow]")
+                self._retry(lambda b=block: self.client.blocks.children.append(block_id=page_id, children=[b]))
+                continue
+            
+            # Check if adding this block would exceed limits
+            would_exceed_count = len(current_chunk) >= chunk
+            would_exceed_size = (current_size + block_size) > MAX_PAYLOAD_SIZE
+            
+            if would_exceed_count or would_exceed_size:
+                # Send current chunk
+                if current_chunk:
+                    self._retry(lambda p=current_chunk: self.client.blocks.children.append(block_id=page_id, children=p))
+                current_chunk = []
+                current_size = 0
+            
+            current_chunk.append(block)
+            current_size += block_size
+        
+        # Send remaining chunk
+        if current_chunk:
+            self._retry(lambda p=current_chunk: self.client.blocks.children.append(block_id=page_id, children=p))
     
     def _count_all_blocks(self, blocks: List[Dict[str, Any]]) -> int:
         """Count all blocks including nested ones (column_list children, etc.)"""

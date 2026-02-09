@@ -1,6 +1,6 @@
 """
 Upload strategies for handling images during Notion import.
-Supports: Tunnel, file.io, AWS S3, Cloudflare R2, Backblaze B2, Notion Native.
+Supports: AWS S3, Google Cloud Storage, Notion Native Upload.
 
 Each strategy handles image upload differently to solve the 404 problem.
 """
@@ -11,10 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import requests
 
-from .constants import (
-    TUNNEL_KEEPALIVE_PER_FAILED_PAGE,
-    S3_PRESIGNED_URL_EXPIRY
-)
+from .constants import S3_PRESIGNED_URL_EXPIRY
 from .models import StrategyConfig, UploadMode
 
 
@@ -127,56 +124,6 @@ class UploadStrategy(ABC):
             print(f"  [dim]Uploading {path.suffix} file with MIME type: {mime_type}[/dim]")
             
         return mime_type
-
-
-class TunnelStrategy(UploadStrategy):
-    """
-    Original tunnel-based serving (cloudflared/ngrok).
-    
-    Pros: Fast, free, no account needed
-    Cons: Tunnel expires after keepalive, causes 404s if Notion delays
-    """
-    
-    def __init__(self, keepalive_sec: int):
-        self.keepalive_sec = keepalive_sec
-        self.server = None
-        self.tunnel = None
-        self.public_url = ""
-        self.source_dir = None
-    
-    def prepare(self, source_dir: Path) -> str:
-        from .image_server import StaticServer, Tunnel
-        
-        self.source_dir = source_dir
-        self.server = StaticServer(source_dir)
-        self.server.start()
-        self.tunnel = Tunnel(self.server.base_url())
-        self.public_url = self.tunnel.start()
-        
-        print(f"[green]Tunnel started:[/green] {self.public_url}")
-        return self.public_url
-    
-    def upload_image(self, local_path: Path, context: Dict) -> str:
-        # No upload - served via tunnel
-        rel_path = local_path.relative_to(self.source_dir)
-        return f"{self.public_url}/{rel_path}"
-    
-    def cleanup(self, failed_count: int = 0):
-        # Extend keepalive if there are failures
-        keepalive = self.keepalive_sec
-        if failed_count > 0:
-            extra = failed_count * TUNNEL_KEEPALIVE_PER_FAILED_PAGE
-            keepalive += extra
-            print(f"[yellow]Extending keepalive by {extra}s for {failed_count} failed pages[/yellow]")
-        
-        print(f"[cyan]Keeping tunnel alive for {keepalive}s...[/cyan]")
-        time.sleep(keepalive)
-        
-        if self.tunnel:
-            self.tunnel.stop()
-    
-    def needs_keepalive(self) -> bool:
-        return True
 
 
 class S3TempStrategy(UploadStrategy):
@@ -383,58 +330,322 @@ class S3PermanentStrategy(UploadStrategy):
         return False
 
 
-class CloudflareR2Strategy(UploadStrategy):
+class GCSStrategy(UploadStrategy):
     """
-    Cloudflare R2 upload strategy (S3-compatible, cheaper than S3).
+    Google Cloud Storage upload strategy.
     
-    Pros: Cheaper than S3 ($0.015/GB vs S3's $0.023/GB), no egress fees
-    Cons: Requires Cloudflare account
+    Supports two authentication modes:
+    1. Local signing: Uses service account JSON file (credentials never leave your machine)
+    2. Impersonation: Uses ADC + service account impersonation (no local JSON needed)
+    
+    Supports auto-delete via lifecycle rules.
+    
+    Pros:
+    - Reliable (99.9% uptime)
+    - Supports lifecycle auto-delete
+    - Good for Google Cloud users
+    - Impersonation mode works without local credential files
+    
+    Cons:
+    - Requires GCP account and service account setup
+    - Impersonation requires iam.serviceAccountTokenCreator role
     """
     
-    def __init__(self, bucket: str, account_id: str, access_key: str, secret_key: str, public_domain: str):
-        self.bucket = bucket
-        self.account_id = account_id
-        self.access_key = access_key
-        self.secret_key = secret_key
-        self.public_domain = public_domain
+    def __init__(self, bucket: str, project_id: str, credentials_path: str = "",
+                 lifecycle_days: int = 1, use_impersonation: bool = False,
+                 impersonate_service_account: str = ""):
+        self.bucket_name = bucket
+        self.project_id = project_id
+        self.credentials_path = credentials_path
+        self.lifecycle_days = lifecycle_days
+        self.use_impersonation = use_impersonation
+        self.impersonate_service_account = impersonate_service_account
         self.client = None
+        self.bucket = None
         self.uploaded_count = 0
+        self._signing_credentials = None  # For signed URL generation
+    
+    def _run_gcloud_adc_login(self) -> bool:
+        """
+        Run gcloud auth application-default login to trigger browser authentication.
+        Returns True if successful, False otherwise.
+        """
+        import subprocess
+        import shutil
+        
+        gcloud_path = shutil.which('gcloud')
+        if not gcloud_path:
+            print("[yellow]gcloud CLI not found. Please install Google Cloud SDK.[/yellow]")
+            print("[yellow]  https://cloud.google.com/sdk/docs/install[/yellow]")
+            return False
+        
+        print("[cyan]Opening browser for Google Cloud authentication...[/cyan]")
+        print("[dim]  Please complete the login in your browser.[/dim]")
+        
+        try:
+            # Run gcloud auth application-default login
+            # This will open browser and wait for user to complete auth
+            result = subprocess.run(
+                [gcloud_path, 'auth', 'application-default', 'login'],
+                capture_output=False,  # Let it show output to user
+                text=True
+            )
+            
+            if result.returncode == 0:
+                print("[green]✓ Google Cloud authentication successful![/green]")
+                return True
+            else:
+                print("[red]✗ Google Cloud authentication failed or was cancelled.[/red]")
+                return False
+                
+        except Exception as e:
+            print(f"[red]✗ Failed to run gcloud auth: {str(e)}[/red]")
+            return False
+    
+    def _get_adc_credentials(self):
+        """
+        Get ADC credentials, triggering browser auth if needed.
+        Returns (credentials, project) tuple or raises UploadError.
+        """
+        import google.auth
+        from google.auth.exceptions import DefaultCredentialsError
+        from src.models.errors import UploadError, ErrorCode
+        
+        try:
+            return google.auth.default()
+        except DefaultCredentialsError:
+            # ADC not configured - trigger browser authentication
+            print("[yellow]Google Cloud ADC not configured.[/yellow]")
+            print("[yellow]Starting browser authentication...[/yellow]")
+            
+            if self._run_gcloud_adc_login():
+                # Retry after successful auth
+                try:
+                    return google.auth.default()
+                except DefaultCredentialsError:
+                    raise UploadError(
+                        ErrorCode.CONFIG_GCS_ADC_AUTH_FAILED,
+                        "ADC still not available after authentication",
+                        "Try running manually: gcloud auth application-default login"
+                    )
+            else:
+                raise UploadError(
+                    ErrorCode.CONFIG_GCS_ADC_NOT_CONFIGURED,
+                    "Google Cloud ADC authentication required",
+                    "Run: gcloud auth application-default login"
+                )
     
     def prepare(self, source_dir: Path) -> str:
-        import boto3
+        from src.models.errors import UploadError, ErrorCode
         
-        endpoint = f'https://{self.account_id}.r2.cloudflarestorage.com'
-        
-        self.client = boto3.client('s3',
-            endpoint_url=endpoint,
-            aws_access_key_id=self.access_key,
-            aws_secret_access_key=self.secret_key
-        )
-        
-        print(f"[green]Using Cloudflare R2: {self.bucket}[/green]")
-        return ""
-    
-    def upload_image(self, local_path: Path, context: Dict) -> str:
-        content_hash = hashlib.md5(local_path.read_bytes()).hexdigest()[:12]
-        timestamp = int(time.time())
-        key = f'notion-imports/{timestamp}/{content_hash}/{local_path.name}'
-        
-        with open(local_path, 'rb') as f:
-            self.client.put_object(
-                Bucket=self.bucket,
-                Key=key,
-                Body=f.read(),
-                ContentType=self._get_content_type(local_path)
+        try:
+            from google.cloud import storage
+        except ModuleNotFoundError:
+            raise UploadError(
+                ErrorCode.CONFIG_MISSING_GCS_LIBRARY,
+                "Google Cloud libraries not installed",
+                "Run: pip install google-cloud-storage google-auth"
             )
         
-        self.uploaded_count += 1
-        cdn_url = f'https://{self.public_domain}/{key}'
+        try:
+            if self.use_impersonation:
+                # Impersonation mode: use ADC + impersonate service account
+                from google.auth import impersonated_credentials
+                from google.auth.exceptions import RefreshError
+                
+                # Get source credentials from ADC (triggers browser auth if needed)
+                source_credentials, _ = self._get_adc_credentials()
+                
+                # Create impersonated credentials
+                target_credentials = impersonated_credentials.Credentials(
+                    source_credentials=source_credentials,
+                    target_principal=self.impersonate_service_account,
+                    target_scopes=['https://www.googleapis.com/auth/cloud-platform']
+                )
+                
+                self.client = storage.Client(
+                    project=self.project_id,
+                    credentials=target_credentials
+                )
+                self._signing_credentials = target_credentials
+                auth_mode = f"impersonating {self.impersonate_service_account}"
+                
+                # Test impersonation by trying to access the bucket
+                # This will fail early if impersonation permissions are missing or credentials expired
+                try:
+                    self.bucket = self.client.bucket(self.bucket_name)
+                    # Force a refresh to test impersonation
+                    _ = self.bucket.exists()
+                except RefreshError as e:
+                    error_str = str(e)
+                    
+                    # Check if reauthentication is needed (expired credentials)
+                    if "Reauthentication is needed" in error_str or "reauth" in error_str.lower():
+                        print(f"[yellow][{ErrorCode.CONFIG_GCS_ADC_EXPIRED.value}] Google Cloud credentials expired.[/yellow]")
+                        print("[yellow]Starting browser authentication...[/yellow]")
+                        
+                        if self._run_gcloud_adc_login():
+                            # Retry after successful reauthentication
+                            print(f"[green][{ErrorCode.CONFIG_GCS_ADC_REAUTH_SUCCESS.value}] Reauthentication successful![/green]")
+                            print("[cyan]Retrying GCS connection...[/cyan]")
+                            # Recreate credentials and client after reauth
+                            source_credentials, _ = self._get_adc_credentials()
+                            target_credentials = impersonated_credentials.Credentials(
+                                source_credentials=source_credentials,
+                                target_principal=self.impersonate_service_account,
+                                target_scopes=['https://www.googleapis.com/auth/cloud-platform']
+                            )
+                            self.client = storage.Client(
+                                project=self.project_id,
+                                credentials=target_credentials
+                            )
+                            self._signing_credentials = target_credentials
+                            self.bucket = self.client.bucket(self.bucket_name)
+                            # Test again
+                            _ = self.bucket.exists()
+                        else:
+                            raise UploadError(
+                                ErrorCode.CONFIG_GCS_ADC_AUTH_FAILED,
+                                "Browser reauthentication failed or was cancelled",
+                                "Run manually: gcloud auth application-default login"
+                            )
+                    elif "Gaia id not found" in error_str or "Unable to acquire impersonated credentials" in error_str:
+                        # Service account not found or user identity not recognized
+                        raise UploadError(
+                            ErrorCode.CONFIG_GCS_SA_NOT_FOUND,
+                            f"Cannot find service account or your identity",
+                            f"1. Verify SA email is correct: {self.impersonate_service_account}\n"
+                            f"   2. Ensure SA exists in the project\n"
+                            f"   3. Grant roles/iam.serviceAccountTokenCreator with: gcloud iam service-accounts add-iam-policy-binding {self.impersonate_service_account} --member='user:YOUR_EMAIL' --role='roles/iam.serviceAccountTokenCreator'"
+                        )
+                    elif "iam.serviceAccounts.getAccessToken" in error_str or "permission" in error_str.lower():
+                        raise UploadError(
+                            ErrorCode.CONFIG_GCS_IMPERSONATION_FAILED,
+                            f"Cannot impersonate {self.impersonate_service_account}",
+                            "Grant roles/iam.serviceAccountTokenCreator to your account on the target SA"
+                        )
+                    else:
+                        raise
+                    
+            else:
+                # Local signing mode: use service account JSON file
+                from google.oauth2 import service_account
+                
+                credentials = service_account.Credentials.from_service_account_file(
+                    self.credentials_path
+                )
+                self.client = storage.Client(
+                    project=self.project_id,
+                    credentials=credentials
+                )
+                self._signing_credentials = credentials
+                auth_mode = "service account for local signing"
+                self.bucket = self.client.bucket(self.bucket_name)
+            
+            # Verify bucket exists
+            if not self.bucket.exists():
+                raise UploadError(
+                    ErrorCode.CONFIG_MISSING_GCS,
+                    f"GCS bucket '{self.bucket_name}' not found",
+                    "Check bucket name and service account permissions"
+                )
+            
+            print(f"[green]Using GCS: {self.bucket_name} (project: {self.project_id})[/green]")
+            print(f"[green]  Files will auto-delete after {self.lifecycle_days} day(s)[/green]")
+            print(f"[dim]  Using {auth_mode}[/dim]")
+            return ""
+            
+        except UploadError:
+            # Re-raise our custom errors
+            raise
+        except Exception as e:
+            error_str = str(e)
+            error_module = str(type(e).__module__)
+            
+            # Check for reauthentication needed
+            if "Reauthentication is needed" in error_str or "reauth" in error_str.lower():
+                print(f"[yellow][{ErrorCode.CONFIG_GCS_ADC_EXPIRED.value}] Google Cloud credentials expired.[/yellow]")
+                print("[yellow]Starting browser authentication...[/yellow]")
+                
+                if self._run_gcloud_adc_login():
+                    raise UploadError(
+                        ErrorCode.CONFIG_GCS_ADC_REAUTH_SUCCESS,
+                        "Reauthentication completed successfully",
+                        "Credentials have been refreshed - please retry the import"
+                    )
+                else:
+                    raise UploadError(
+                        ErrorCode.CONFIG_GCS_ADC_AUTH_FAILED,
+                        "Browser reauthentication failed or was cancelled",
+                        "Run manually: gcloud auth application-default login"
+                    )
+            
+            # Check for specific Google auth errors
+            if "Gaia id not found" in error_str or "Unable to acquire impersonated credentials" in error_str:
+                raise UploadError(
+                    ErrorCode.CONFIG_GCS_SA_NOT_FOUND,
+                    f"Cannot find service account or your identity",
+                    f"1. Verify SA email is correct: {self.impersonate_service_account}\n"
+                    f"   2. Ensure SA exists in the project\n"
+                    f"   3. Grant permission: gcloud iam service-accounts add-iam-policy-binding {self.impersonate_service_account} --member='user:YOUR_EMAIL' --role='roles/iam.serviceAccountTokenCreator'"
+                )
+            
+            if "iam.serviceAccounts.getAccessToken" in error_str:
+                raise UploadError(
+                    ErrorCode.CONFIG_GCS_IMPERSONATION_FAILED,
+                    f"Cannot impersonate {self.impersonate_service_account}",
+                    "Grant roles/iam.serviceAccountTokenCreator to your account on the target SA"
+                )
+            
+            if "google" in error_module:
+                hint = "Check credentials and permissions"
+                if self.use_impersonation:
+                    hint = "Check ADC setup and iam.serviceAccountTokenCreator role"
+                raise UploadError(
+                    ErrorCode.CONFIG_INVALID_GCS,
+                    f"GCS initialization failed: {error_str}",
+                    hint
+                )
+            raise
+    
+    def upload_image(self, local_path: Path, context: Dict) -> str:
+        """Upload to GCS and return public URL.
         
-        print(f"  [dim]→ Cloudflare R2 ({self.uploaded_count}): {local_path.name}[/dim]")
-        return cdn_url
+        Note: Bucket must have public access enabled:
+          gcloud storage buckets update gs://BUCKET --no-public-access-prevention
+          gcloud storage buckets add-iam-policy-binding gs://BUCKET --member=allUsers --role=roles/storage.objectViewer
+        """
+        # Generate unique key with timestamp and hash (unguessable)
+        content_hash = hashlib.md5(local_path.read_bytes()).hexdigest()[:12]
+        timestamp = int(time.time())
+        # Use notion-temp/ prefix for lifecycle rule targeting
+        key = f'notion-temp/{timestamp}/{content_hash}/{local_path.name}'
+        
+        blob = self.bucket.blob(key)
+        
+        # Upload file
+        blob.upload_from_filename(
+            str(local_path),
+            content_type=self._get_content_type(local_path)
+        )
+        
+        self.uploaded_count += 1
+        
+        # Use public URL (same approach as S3 - Notion rejects signed URLs)
+        # Bucket must be configured for public read access
+        public_url = f"https://storage.googleapis.com/{self.bucket_name}/{key}"
+        
+        # Debug: print first URL to verify format
+        if self.uploaded_count == 1:
+            print(f"  [cyan]First public URL: {public_url}[/cyan]")
+        
+        print(f"  [dim]→ GCS ({self.uploaded_count}): {local_path.name}[/dim]")
+        return public_url
     
     def cleanup(self, failed_count: int = 0):
-        print(f"[green]✓ Uploaded {self.uploaded_count} images to Cloudflare R2[/green]")
+        print(f"[green]✓ Uploaded {self.uploaded_count} files to GCS[/green]")
+        print(f"[green]  GCS lifecycle will auto-delete after {self.lifecycle_days} day(s)[/green]")
+        print(f"[cyan]  Set lifecycle rule in GCS console if not already configured[/cyan]")
     
     def needs_keepalive(self) -> bool:
         return False
@@ -442,95 +653,245 @@ class CloudflareR2Strategy(UploadStrategy):
 
 class NotionNativeStrategy(UploadStrategy):
     """
-    Notion native file upload via S3 temp bridge (EXPERIMENTAL).
+    Notion native file upload strategy.
     
-    Uses S3TempStrategy as bridge instead of file.io (more reliable).
+    Uploads files directly to Notion's storage using their file upload API.
+    Images become permanently hosted by Notion (no external dependencies).
     
-    Approach:
-    1. Upload to S3 temp storage
-    2. Give S3 URL to Notion
-    3. Notion downloads and caches
-    4. Notion converts to 'file' type (hopefully)
-    5. S3 lifecycle auto-deletes after 1 day
+    API Flow:
+    1. Create file upload: POST /v1/file_uploads
+    2. Send file contents: POST /v1/file_uploads/{id}/send
+    3. Return special URL scheme for block creation to use file_upload type
     
-    Pros: Images become Notion-hosted, reliable bridge
-    Cons: Experimental conversion, requires S3 account
+    Pros:
+    - Images are permanently hosted by Notion
+    - No external storage costs
+    - No URL expiration issues
+    
+    Cons:
+    - Requires Notion API token
+    - 20MB max per file (single-part upload)
+    - Files must be attached within 1 hour of upload
     """
     
-    def __init__(self, s3_bucket: str, s3_region: str, s3_access_key: str, s3_secret_key: str):
-        self.s3_helper = S3TempStrategy(s3_bucket, s3_region, s3_access_key, s3_secret_key)
+    # Special URL scheme to indicate Notion native upload
+    # Block creation code checks for this and uses file_upload type
+    NATIVE_URL_SCHEME = "notion-file-upload://"
+    
+    def __init__(self, notion_token: str):
+        self.notion_token = notion_token
         self.uploaded_count = 0
+        self.api_base = "https://api.notion.com/v1"
+        # Use latest API version for file_upload support
+        self.headers = {
+            "Authorization": f"Bearer {notion_token}",
+            "Notion-Version": "2025-09-03"
+        }
+    
+    # Notion's file size limit (20MB)
+    MAX_FILE_SIZE_MB = 20
+    MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
     
     def prepare(self, source_dir: Path) -> str:
-        print("[yellow]Using Notion Native (via S3 temp bridge) - experimental[/yellow]")
-        return self.s3_helper.prepare(source_dir)
+        """Validate Notion token and scan for oversized files"""
+        print("[cyan]Using Notion Native Upload (files hosted by Notion)[/cyan]")
+        
+        # Test the token by making a simple API call
+        try:
+            response = requests.get(
+                f"{self.api_base}/users/me",
+                headers=self.headers,
+                timeout=10
+            )
+            if response.status_code == 401:
+                from .models import UploadError, ErrorCode
+                raise UploadError(
+                    ErrorCode.UPLOAD_STRATEGY_FAILED,
+                    "Notion token is invalid or expired",
+                    "Check your Notion integration token"
+                )
+            elif response.status_code != 200:
+                from .models import UploadError, ErrorCode
+                raise UploadError(
+                    ErrorCode.UPLOAD_STRATEGY_FAILED,
+                    f"Notion API error: {response.status_code}",
+                    response.text[:200]
+                )
+            print("[green]✓ Notion token validated[/green]")
+        except requests.RequestException as e:
+            from .models import UploadError, ErrorCode
+            raise UploadError(
+                ErrorCode.UPLOAD_STRATEGY_FAILED,
+                "Failed to connect to Notion API",
+                str(e)
+            )
+        
+        # Scan for files exceeding Notion's 20MB limit
+        self._scan_oversized_files(source_dir)
+        
+        return ""
+    
+    def _scan_oversized_files(self, source_dir: Path) -> None:
+        """Scan attachments folder for files exceeding Notion's 20MB limit"""
+        attachments_dir = source_dir / "attachments"
+        if not attachments_dir.exists():
+            return
+        
+        oversized_files = []
+        
+        # Common media file extensions
+        media_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', 
+                          '.mp4', '.mov', '.avi', '.webm', '.mp3', '.wav',
+                          '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+                          '.zip', '.tar', '.gz', '.rar'}
+        
+        for file_path in attachments_dir.rglob('*'):
+            if file_path.is_file():
+                # Check if it's a media/attachment file
+                if file_path.suffix.lower() in media_extensions or file_path.parent.name != "attachments":
+                    try:
+                        size = file_path.stat().st_size
+                        if size > self.MAX_FILE_SIZE_BYTES:
+                            size_mb = size / (1024 * 1024)
+                            oversized_files.append((file_path.name, size_mb))
+                    except OSError:
+                        pass
+        
+        if oversized_files:
+            print(f"\n[yellow]⚠ Warning: {len(oversized_files)} file(s) exceed Notion's {self.MAX_FILE_SIZE_MB}MB limit:[/yellow]")
+            # Sort by size descending
+            oversized_files.sort(key=lambda x: x[1], reverse=True)
+            for name, size_mb in oversized_files[:10]:  # Show first 10
+                print(f"  [yellow]• {name} ({size_mb:.1f} MB)[/yellow]")
+            if len(oversized_files) > 10:
+                print(f"  [yellow]... and {len(oversized_files) - 10} more[/yellow]")
+            print(f"[yellow]  These files will be skipped during upload.[/yellow]\n")
     
     def upload_image(self, local_path: Path, context: Dict) -> str:
-        """Upload via S3, hope Notion converts to 'file' type"""
-        url = self.s3_helper.upload_image(local_path, context)
+        """
+        Upload file to Notion and return special URL with file_upload ID.
+        
+        Returns:
+            URL in format: notion-file-upload://{file_upload_id}
+            This signals block creation to use file_upload type instead of external.
+        """
+        from .models import UploadError, ErrorCode
+        
+        # Check file size before uploading
+        try:
+            file_size = local_path.stat().st_size
+            if file_size > self.MAX_FILE_SIZE_BYTES:
+                size_mb = file_size / (1024 * 1024)
+                raise UploadError(
+                    ErrorCode.NOTION_FILE_SIZE_EXCEEDED,
+                    f"File exceeds Notion's {self.MAX_FILE_SIZE_MB}MB limit",
+                    f"{local_path.name} is {size_mb:.1f} MB"
+                )
+        except OSError as e:
+            raise UploadError(
+                ErrorCode.UPLOAD_INVALID_PATH,
+                f"Cannot read file: {local_path.name}",
+                str(e)
+            )
+        
+        # Step 1: Create file upload object
+        try:
+            create_response = requests.post(
+                f"{self.api_base}/file_uploads",
+                headers={**self.headers, "Content-Type": "application/json"},
+                json={},
+                timeout=30
+            )
+            
+            if create_response.status_code != 200:
+                raise UploadError(
+                    ErrorCode.NOTION_FILE_UPLOAD_FAILED,
+                    f"Failed to create file upload: {create_response.status_code}",
+                    create_response.text[:200]
+                )
+            
+            upload_data = create_response.json()
+            file_upload_id = upload_data.get("id")
+            upload_url = upload_data.get("upload_url")
+            
+            if not file_upload_id or not upload_url:
+                raise UploadError(
+                    ErrorCode.NOTION_FILE_UPLOAD_FAILED,
+                    "Invalid response from Notion file upload API",
+                    str(upload_data)[:200]
+                )
+        except requests.RequestException as e:
+            raise UploadError(
+                ErrorCode.NOTION_FILE_UPLOAD_FAILED,
+                "Network error creating file upload",
+                str(e)
+            )
+        
+        # Step 2: Send file contents
+        try:
+            content_type = self._get_content_type(local_path)
+            
+            with open(local_path, 'rb') as f:
+                files = {
+                    'file': (local_path.name, f, content_type)
+                }
+                
+                # Use upload_url directly (includes the file_upload_id)
+                send_response = requests.post(
+                    upload_url,
+                    headers={
+                        "Authorization": self.headers["Authorization"],
+                        "Notion-Version": self.headers["Notion-Version"]
+                    },
+                    files=files,
+                    timeout=120  # Longer timeout for file upload
+                )
+            
+            if send_response.status_code != 200:
+                raise UploadError(
+                    ErrorCode.NOTION_FILE_UPLOAD_FAILED,
+                    f"Failed to upload file: {send_response.status_code}",
+                    send_response.text[:200]
+                )
+            
+            result = send_response.json()
+            if result.get("status") == "expired":
+                raise UploadError(
+                    ErrorCode.NOTION_FILE_UPLOAD_EXPIRED,
+                    "File upload expired before attachment",
+                    "Files must be attached within 1 hour of upload"
+                )
+            elif result.get("status") != "uploaded":
+                raise UploadError(
+                    ErrorCode.NOTION_FILE_UPLOAD_FAILED,
+                    f"File upload status: {result.get('status')}",
+                    str(result)[:200]
+                )
+                
+        except requests.RequestException as e:
+            raise UploadError(
+                ErrorCode.NOTION_FILE_UPLOAD_FAILED,
+                "Network error uploading file",
+                str(e)
+            )
+        
         self.uploaded_count += 1
-        return url
+        
+        # Return special URL scheme that signals native upload
+        native_url = f"{self.NATIVE_URL_SCHEME}{file_upload_id}"
+        
+        if self.uploaded_count == 1:
+            print(f"  [cyan]First file upload ID: {file_upload_id}[/cyan]")
+        
+        print(f"  [dim]→ Notion Native ({self.uploaded_count}): {local_path.name}[/dim]")
+        return native_url
     
     def cleanup(self, failed_count: int = 0):
-        print(f"[green]✓ Uploaded {self.uploaded_count} images (Notion should cache as 'file' type)[/green]")
-        self.s3_helper.cleanup(failed_count)
+        print(f"[green]✓ Uploaded {self.uploaded_count} files to Notion[/green]")
+        print(f"[green]  Files are permanently hosted by Notion[/green]")
     
     def needs_keepalive(self) -> bool:
         return False
-
-
-class FallbackStrategy(UploadStrategy):
-    """
-    Fallback strategy that tries primary, falls back to secondary on failure.
-    
-    Example: Try file.io first, fall back to S3 if file.io fails.
-    """
-    
-    def __init__(self, primary: UploadStrategy, fallback: UploadStrategy):
-        self.primary = primary
-        self.fallback = fallback
-        self.using_fallback = False
-        self.primary_failures = 0
-    
-    def prepare(self, source_dir: Path) -> str:
-        try:
-            return self.primary.prepare(source_dir)
-        except Exception as e:
-            print(f"[yellow]Primary strategy failed: {e}[/yellow]")
-            print(f"[yellow]Falling back to {self.fallback.get_name()}...[/yellow]")
-            self.using_fallback = True
-            return self.fallback.prepare(source_dir)
-    
-    def upload_image(self, local_path: Path, context: Dict) -> str:
-        if self.using_fallback:
-            return self.fallback.upload_image(local_path, context)
-        
-        try:
-            return self.primary.upload_image(local_path, context)
-        except Exception as e:
-            self.primary_failures += 1
-            
-            # Switch to fallback after 3 failures
-            if self.primary_failures >= 3 and not self.using_fallback:
-                print(f"[yellow]Switching to fallback after {self.primary_failures} failures[/yellow]")
-                self.using_fallback = True
-                self.fallback.prepare(context.get('source_dir', Path.cwd()))
-            
-            if self.using_fallback:
-                return self.fallback.upload_image(local_path, context)
-            else:
-                raise  # Re-raise if not using fallback yet
-    
-    def cleanup(self, failed_count: int = 0):
-        if self.using_fallback:
-            self.fallback.cleanup(failed_count)
-        else:
-            self.primary.cleanup(failed_count)
-    
-    def needs_keepalive(self) -> bool:
-        if self.using_fallback:
-            return self.fallback.needs_keepalive()
-        return self.primary.needs_keepalive()
 
 
 def create_strategy(config: StrategyConfig) -> UploadStrategy:
@@ -565,26 +926,31 @@ def create_strategy(config: StrategyConfig) -> UploadStrategy:
             secret_key=config.s3.secret_key
         )
     
-    elif mode == UploadMode.CLOUDFLARE:
-        return CloudflareR2Strategy(
-            bucket=config.cloudflare.bucket,
-            account_id=config.cloudflare.account_id,
-            access_key=config.cloudflare.access_key,
-            secret_key=config.cloudflare.secret_key,
-            public_domain=config.cloudflare.public_domain
+    elif mode == UploadMode.GCS:
+        # Google Cloud Storage
+        return GCSStrategy(
+            bucket=config.gcs.bucket,
+            project_id=config.gcs.project_id,
+            credentials_path=config.gcs.credentials_path,
+            lifecycle_days=config.gcs.lifecycle_days,
+            use_impersonation=config.gcs.use_impersonation,
+            impersonate_service_account=config.gcs.impersonate_service_account
         )
     
     elif mode == UploadMode.NOTION_NATIVE:
-        # Notion Native via S3 temp bridge
+        # Notion native file upload (files hosted by Notion)
         return NotionNativeStrategy(
-            s3_bucket=config.s3.bucket,
-            s3_region=config.s3.region,
-            s3_access_key=config.s3.access_key,
-            s3_secret_key=config.s3.secret_key
+            notion_token=config.notion_token
         )
     
-    else:  # UploadMode.TUNNEL (default)
-        return TunnelStrategy(
-            keepalive_sec=config.tunnel.keepalive_sec
+    else:
+        # Default to S3 temp (RECOMMENDED)
+        return S3TempStrategy(
+            bucket=config.s3.bucket,
+            region=config.s3.region,
+            access_key=config.s3.access_key,
+            secret_key=config.s3.secret_key,
+            lifecycle_days=config.s3.lifecycle_days,
+            use_presigned=config.s3.use_presigned
         )
 

@@ -15,24 +15,25 @@ class ErrorCode(Enum):
     CONFIG_SOURCE_NOT_DIR = "E1003"
     CONFIG_MISSING_TOKEN = "E1004"
     CONFIG_MISSING_PARENT = "E1005"
-    CONFIG_INVALID_TUNNEL = "E1006"
     CONFIG_MISSING_S3 = "E1007"
-    CONFIG_MISSING_CF = "E1008"
     CONFIG_INVALID_LIFECYCLE = "E1009"
     CONFIG_PARSE_ERROR = "E1010"
     CONFIG_S3_REGION_MISMATCH = "E1011"
     CONFIG_S3_PUBLIC_ACCESS = "E1012"
+    CONFIG_MISSING_GCS = "E1013"
+    CONFIG_INVALID_GCS = "E1014"
+    CONFIG_MISSING_GCS_LIBRARY = "E1015"
+    CONFIG_GCS_ADC_NOT_CONFIGURED = "E1016"
+    CONFIG_GCS_ADC_AUTH_FAILED = "E1017"
+    CONFIG_GCS_IMPERSONATION_FAILED = "E1018"
+    CONFIG_GCS_ADC_EXPIRED = "E1019"
+    CONFIG_GCS_ADC_REAUTH_SUCCESS = "E1020"
+    CONFIG_GCS_SA_NOT_FOUND = "E1021"
     
     # Upload Errors (2xxx)
     UPLOAD_IMAGE_FAILED = "E2001"
     UPLOAD_STRATEGY_FAILED = "E2002"
-    UPLOAD_FALLBACK_FAILED = "E2003"
     UPLOAD_INVALID_PATH = "E2004"
-    
-    # Tunnel Errors (3xxx)
-    TUNNEL_NOT_FOUND = "E3001"
-    TUNNEL_START_FAILED = "E3002"
-    TUNNEL_CONNECTION_FAILED = "E3003"
     
     # Notion API Errors (4xxx)
     NOTION_API_ERROR = "E4001"
@@ -44,6 +45,11 @@ class ErrorCode(Enum):
     NOTION_INVALID_IMAGE_URL = "E4007"
     NOTION_INVALID_LINK_URL = "E4008"
     NOTION_INVALID_FILE_URL = "E4009"
+    NOTION_FILE_UPLOAD_FAILED = "E4010"
+    NOTION_FILE_UPLOAD_EXPIRED = "E4011"
+    NOTION_API_VERSION_TOO_OLD = "E4012"
+    NOTION_FILE_UPLOAD_INVALID_STRUCT = "E4013"
+    NOTION_FILE_SIZE_EXCEEDED = "E4014"
     
     # Verification Errors (5xxx)
     VERIFY_TIMEOUT = "E5001"
@@ -88,6 +94,10 @@ class ErrorCode(Enum):
     WARN_EMOTICON_CONVERSION_FAILED = "W9017"  # Failed to convert emoticon image to emoji character
     WARN_EMOTICON_FALLBACK_INVALID = "W9018"  # Emoticon emoji fallback is empty or invalid
     WARN_TABLE_ROW_CELL_LIMIT = "W9019"  # Table row exceeds Notion's 100 cell limit - truncated
+    INFO_UNUSED_ATTACHMENT_SKIPPED = "I9020"  # Unused attachment not referenced in content - skipped
+    INFO_RICH_TEXT_SEGMENT_SPLIT = "I9021"  # Rich text segment split to fit Notion's 2000 char limit
+    INFO_INLINE_STYLE_STRIPPED = "I9022"  # Inline style/script tags stripped from content
+    INFO_PAYLOAD_SIZE_CHUNKING = "I9023"  # Large page split into smaller chunks due to API payload limits
 
 
 class NotionImporterError(Exception):
@@ -114,11 +124,6 @@ class ConfigurationError(NotionImporterError):
 
 class UploadError(NotionImporterError):
     """Upload strategy errors"""
-    pass
-
-
-class TunnelError(NotionImporterError):
-    """Tunnel-related errors"""
     pass
 
 
@@ -149,20 +154,22 @@ ERROR_MESSAGES = {
     ErrorCode.CONFIG_SOURCE_NOT_DIR: "Source path is not a directory",
     ErrorCode.CONFIG_MISSING_TOKEN: "Notion token is required",
     ErrorCode.CONFIG_MISSING_PARENT: "Parent ID is required",
-    ErrorCode.CONFIG_INVALID_TUNNEL: "Invalid tunnel keepalive duration",
     ErrorCode.CONFIG_MISSING_S3: "S3 configuration incomplete",
-    ErrorCode.CONFIG_MISSING_CF: "Cloudflare configuration incomplete",
     ErrorCode.CONFIG_INVALID_LIFECYCLE: "Invalid S3 lifecycle days",
     ErrorCode.CONFIG_S3_PUBLIC_ACCESS: "S3 bucket requires public read access for notion-temp/* prefix",
+    ErrorCode.CONFIG_MISSING_GCS: "GCS configuration incomplete",
+    ErrorCode.CONFIG_INVALID_GCS: "GCS configuration invalid",
+    ErrorCode.CONFIG_MISSING_GCS_LIBRARY: "Google Cloud libraries not installed. Run: pip install google-cloud-storage google-auth",
+    ErrorCode.CONFIG_GCS_ADC_NOT_CONFIGURED: "Google Cloud ADC not configured. Browser authentication required",
+    ErrorCode.CONFIG_GCS_ADC_AUTH_FAILED: "Google Cloud ADC browser authentication failed or was cancelled",
+    ErrorCode.CONFIG_GCS_IMPERSONATION_FAILED: "Failed to impersonate service account. Check IAM permissions (roles/iam.serviceAccountTokenCreator)",
+    ErrorCode.CONFIG_GCS_ADC_EXPIRED: "Google Cloud ADC credentials expired. Browser reauthentication required",
+    ErrorCode.CONFIG_GCS_ADC_REAUTH_SUCCESS: "Google Cloud reauthentication completed successfully. Please retry the import",
+    ErrorCode.CONFIG_GCS_SA_NOT_FOUND: "Service account not found or your identity not recognized. Verify SA email and IAM permissions",
     
     ErrorCode.UPLOAD_IMAGE_FAILED: "Failed to upload image",
     ErrorCode.UPLOAD_STRATEGY_FAILED: "Upload strategy initialization failed",
-    ErrorCode.UPLOAD_FALLBACK_FAILED: "Fallback strategy also failed",
     ErrorCode.UPLOAD_INVALID_PATH: "Invalid image path - relative URLs with leading slash",
-    
-    ErrorCode.TUNNEL_NOT_FOUND: "No tunnel tool found (cloudflared or ngrok)",
-    ErrorCode.TUNNEL_START_FAILED: "Failed to start tunnel",
-    ErrorCode.TUNNEL_CONNECTION_FAILED: "Tunnel connection failed",
     
     ErrorCode.NOTION_API_ERROR: "Notion API error",
     ErrorCode.NOTION_RATE_LIMIT: "Notion API rate limit exceeded",
@@ -172,6 +179,11 @@ ERROR_MESSAGES = {
     ErrorCode.NOTION_INVALID_IMAGE_URL: "Invalid image URL. Draw.io XML files (.drawio) cannot be used as images",
     ErrorCode.NOTION_INVALID_LINK_URL: "Invalid URL for link. Relative HTML links are not supported by Notion - links must be absolute URLs (http/https) or mailto",
     ErrorCode.NOTION_INVALID_FILE_URL: "Invalid file URL. File attachments require absolute URLs - use S3/CDN upload strategy for file imports",
+    ErrorCode.NOTION_FILE_UPLOAD_FAILED: "Notion file upload failed. Check your Notion token permissions and try again",
+    ErrorCode.NOTION_FILE_UPLOAD_EXPIRED: "Notion file upload expired. Files must be attached within 1 hour of upload",
+    ErrorCode.NOTION_API_VERSION_TOO_OLD: "Notion API version too old for file_upload type. Upgrade notion-client package to 2.7.0+",
+    ErrorCode.NOTION_FILE_UPLOAD_INVALID_STRUCT: "Invalid file_upload block structure. Ensure file_upload object uses 'id' key with valid UUID",
+    ErrorCode.NOTION_FILE_SIZE_EXCEEDED: "File exceeds Notion's 20MB upload limit. Use S3/GCS for larger files or compress the file",
     
     ErrorCode.VERIFY_TIMEOUT: "Image verification timeout",
     ErrorCode.VERIFY_API_ERROR: "Error during verification",
@@ -210,6 +222,10 @@ ERROR_MESSAGES = {
     ErrorCode.WARN_EMOTICON_CONVERSION_FAILED: "Failed to convert emoticon image to emoji character - emoticon may appear as missing or broken",
     ErrorCode.WARN_EMOTICON_FALLBACK_INVALID: "Emoticon emoji fallback is empty or invalid - emoticon may not display correctly",
     ErrorCode.WARN_TABLE_ROW_CELL_LIMIT: "Table row exceeds Notion's 100 cell limit - row truncated to first 100 cells",
+    ErrorCode.INFO_UNUSED_ATTACHMENT_SKIPPED: "Unused attachment skipped - file exists in attachments folder but is not embedded in page content (common in Confluence exports)",
+    ErrorCode.INFO_RICH_TEXT_SEGMENT_SPLIT: "Rich text segment exceeding 2000 chars was automatically split into multiple segments - formatting and links preserved",
+    ErrorCode.INFO_INLINE_STYLE_STRIPPED: "Inline style/script tags stripped from paragraph - Confluence embeds CSS color definitions inside content that shouldn't be imported as text",
+    ErrorCode.INFO_PAYLOAD_SIZE_CHUNKING: "Page content exceeds API payload limit - automatically split into smaller chunks for upload (common with large tables 100+ rows)",
 }
 
 

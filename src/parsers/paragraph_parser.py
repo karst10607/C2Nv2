@@ -25,6 +25,11 @@ def parse_paragraph(el: Tag, colorid_map: Optional[Dict[str, str]] = None) -> Li
     """
     blocks = []
     
+    # Remove inline style/script tags that Confluence embeds in paragraphs
+    # These contain CSS color definitions and shouldn't be treated as text
+    for tag in el.find_all(['style', 'script', 'noscript']):
+        tag.decompose()
+    
     # Replace emoticons with emoji characters BEFORE extracting text
     # This makes them inline emoji in rich text, not separate image blocks
     replace_emoticons_with_emoji(el)

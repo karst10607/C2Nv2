@@ -14,7 +14,7 @@ from .parsers.embedded_wrapper_parser import parse_embedded_wrapper
 from .parsers.image_parser import parse_image
 from .parsers.list_parser import parse_list
 from .parsers.heading_parser import parse_heading
-from .parsers.macro_parser import is_jira_macro, parse_jira_macro, is_google_embed, parse_google_embed
+from .parsers.macro_parser import is_jira_macro, parse_jira_macro, is_google_embed, parse_google_embed, is_info_panel, parse_info_panel
 import logging
 
 # Minimal AST nodes
@@ -310,6 +310,9 @@ def get_element_handler(el: Tag, context: Dict[str, Any]) -> Optional[Any]:
     if is_google_embed(el):
         return lambda el, ctx: parse_google_embed(el, ctx)
     
+    if is_info_panel(el):
+        return lambda el, ctx: parse_info_panel(el, ctx)
+    
     # Special case handlers
     if name == 'div' and 'toc-macro' in el.get('class', []):
         return None  # Skip TOC macros
@@ -339,7 +342,16 @@ def get_element_handler(el: Tag, context: Dict[str, Any]) -> Optional[Any]:
     return element_handlers.get(name)
 
 
-def parse_html_file(path: Path) -> Dict[str, Any]:
+def parse_html_file(path: Path, include_unused_attachments: bool = False) -> Dict[str, Any]:
+    """
+    Parse a Confluence HTML export file into an AST.
+    
+    Args:
+        path: Path to the HTML file
+        include_unused_attachments: If False (default), only include attachments that are 
+            actually embedded/referenced in the page content. If True, include all 
+            attachments listed in the Attachments section (Confluence legacy behavior).
+    """
     html = Path(path).read_text(encoding='utf-8', errors='ignore')
     soup = BeautifulSoup(html, 'lxml')
     title = (soup.title.string.strip() if soup.title and soup.title.string else Path(path).stem)
@@ -355,12 +367,14 @@ def parse_html_file(path: Path) -> Dict[str, Any]:
     
     blocks: List[Dict[str, Any]] = []
     processed = set()  # Track processed elements to avoid duplicates
+    referenced_attachments = set()  # Track attachments actually used in content
     
     # Create context for handlers
     context = {
         'colorid_map': colorid_map,
         'soup': soup,
-        'path': path
+        'path': path,
+        'referenced_attachments': referenced_attachments  # Pass to handlers
     }
 
     for el in content.descendants:
@@ -385,45 +399,129 @@ def parse_html_file(path: Path) -> Dict[str, Any]:
                 # Mark as processed
                 processed.add(el)
     
-    # Parse attachments section for all attachment types
-    attachments_section = soup.find('div', class_='pageSection')
-    if attachments_section:
-        attachments_header = attachments_section.find('h2', id='attachments')
-        if attachments_header:
-            # Found attachments section
-            attachment_links = attachments_section.find_all('a', href=True)
-            for link in attachment_links:
-                href = link.get('href', '')
-                if href.startswith('attachments/'):
-                    filename = link.get_text(strip=True)
-                    file_ext = Path(filename).suffix.lower()
-                    
-                    # Skip if it's already been processed as an image or video
-                    media_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp',
-                                      '.mp4', '.mov', '.avi', '.webm']
-                    
-                    if file_ext not in media_extensions:
-                        # Handle temporary files - these are often Draw.io backup files
-                        if file_ext == '.tmp':
-                            # Check if it's a Draw.io temp file
-                            if 'drawio' in filename.lower():
-                                logging.info(f"Found Draw.io temp file: {filename} - these are auto-save backups")
-                            logging.debug(get_error_message(
-                                ErrorCode.WARN_TEMP_FILE_SKIPPED,
-                                f"Skipping temporary file attachment: {filename}"
-                            ))
+    # Collect all attachment paths that are actually referenced in content
+    def collect_referenced_attachments(blocks_list):
+        """Recursively collect all attachment paths from blocks."""
+        paths = set()
+        for block in blocks_list:
+            # Check src field (images, files, videos)
+            src = block.get('src', '')
+            if src and src.startswith('attachments/'):
+                paths.add(src)
+            # Check attachment_path (drawio)
+            att_path = block.get('attachment_path', '')
+            if att_path and 'attachments/' in att_path:
+                paths.add(att_path)
+            # Recursively check children
+            if 'children' in block:
+                paths.update(collect_referenced_attachments(block['children']))
+            # Check table rows
+            if 'rows' in block:
+                for row in block['rows']:
+                    for cell in row:
+                        if 'children' in cell:
+                            paths.update(collect_referenced_attachments(cell['children']))
+        return paths
+    
+    referenced_attachments = collect_referenced_attachments(blocks)
+    unused_attachments_count = 0
+    unused_attachments = []  # Details of unused attachments for tracking
+    
+    # Parse attachments section - only include if explicitly enabled
+    if include_unused_attachments:
+        attachments_section = soup.find('div', class_='pageSection')
+        if attachments_section:
+            attachments_header = attachments_section.find('h2', id='attachments')
+            if attachments_header:
+                # Found attachments section
+                attachment_links = attachments_section.find_all('a', href=True)
+                for link in attachment_links:
+                    href = link.get('href', '')
+                    if href.startswith('attachments/'):
+                        # Skip if already referenced in content
+                        if href in referenced_attachments:
                             continue
                             
-                        # It's a document/file attachment
-                        blocks.append({
-                            'type': 'file',
-                            'src': href,
-                            'name': filename
+                        filename = link.get_text(strip=True)
+                        file_ext = Path(filename).suffix.lower()
+                        
+                        # Skip if it's already been processed as an image or video
+                        media_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp',
+                                          '.mp4', '.mov', '.avi', '.webm']
+                        
+                        if file_ext not in media_extensions:
+                            # Handle temporary files - these are often Draw.io backup files
+                            if file_ext == '.tmp':
+                                # Check if it's a Draw.io temp file
+                                if 'drawio' in filename.lower():
+                                    logging.info(f"Found Draw.io temp file: {filename} - these are auto-save backups")
+                                logging.debug(get_error_message(
+                                    ErrorCode.WARN_TEMP_FILE_SKIPPED,
+                                    f"Skipping temporary file attachment: {filename}"
+                                ))
+                                continue
+                                
+                            # It's a document/file attachment not referenced in content
+                            blocks.append({
+                                'type': 'file',
+                                'src': href,
+                                'name': filename
+                            })
+                            logging.info(f"Added unused file attachment: {filename}")
+    else:
+        # Collect details about unused attachments for reporting
+        attachments_section = soup.find('div', class_='pageSection')
+        if attachments_section:
+            attachments_header = attachments_section.find('h2', id='attachments')
+            if attachments_header:
+                attachment_links = attachments_section.find_all('a', href=True)
+                for link in attachment_links:
+                    href = link.get('href', '')
+                    if href.startswith('attachments/') and href not in referenced_attachments:
+                        unused_attachments_count += 1
+                        
+                        # Collect details for skipped media tracking
+                        filename = link.get_text(strip=True) or Path(href).name
+                        file_ext = Path(filename).suffix.lower()
+                        
+                        # Determine media type
+                        image_exts = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'}
+                        video_exts = {'.mp4', '.mov', '.avi', '.webm', '.mkv', '.wmv'}
+                        if file_ext in image_exts:
+                            media_type = 'image'
+                        elif file_ext in video_exts:
+                            media_type = 'video'
+                        else:
+                            media_type = 'file'
+                        
+                        # Try to get file size from actual file
+                        file_path = path.parent / href
+                        file_size = None
+                        if file_path.exists():
+                            try:
+                                file_size = file_path.stat().st_size
+                            except OSError:
+                                pass
+                        
+                        unused_attachments.append({
+                            'file_path': str(file_path),
+                            'filename': filename,
+                            'media_type': media_type,
+                            'file_size_bytes': file_size,
+                            'skip_reason': 'unused_orphan'
                         })
-                        logging.info(f"Added file attachment to import: {filename}")
+    
+    # Log if unused attachments were skipped
+    if unused_attachments_count > 0:
+        logging.info(f"Skipped {unused_attachments_count} unused attachment(s) not referenced in content")
     
     return {
         'title': title,
         'blocks': blocks,
-        'metadata': metadata
+        'metadata': metadata,
+        'attachment_stats': {
+            'referenced': len(referenced_attachments),
+            'unused_skipped': unused_attachments_count,
+            'unused_details': unused_attachments
+        }
     }

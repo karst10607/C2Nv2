@@ -12,6 +12,153 @@ from ..rich_text_parser import extract_rich_text
 # Notion API limit: maximum 100 cells per table row
 NOTION_MAX_CELLS_PER_ROW = 100
 
+# Color name mappings for background colors
+COLOR_NAME_MAP = {
+    # Reds
+    'red': 'red', '#ff0000': 'red', '#f44336': 'red', '#e53935': 'red',
+    '#ffcdd2': 'red', '#ef9a9a': 'red', '#ffebee': 'red',
+    # Greens
+    'green': 'green', '#00ff00': 'green', '#4caf50': 'green', '#43a047': 'green',
+    '#c8e6c9': 'green', '#a5d6a7': 'green', '#e8f5e9': 'green',
+    '#adf0d1': 'green', '#b3d4c4': 'green',
+    # Blues
+    'blue': 'blue', '#0000ff': 'blue', '#2196f3': 'blue', '#1e88e5': 'blue',
+    '#bbdefb': 'blue', '#90caf9': 'blue', '#e3f2fd': 'blue',
+    # Yellows
+    'yellow': 'yellow', '#ffff00': 'yellow', '#ffeb3b': 'yellow', '#fdd835': 'yellow',
+    '#fff9c4': 'yellow', '#fff59d': 'yellow', '#fffde7': 'yellow',
+    '#fffae6': 'yellow',
+    # Oranges
+    'orange': 'orange', '#ff9800': 'orange', '#fb8c00': 'orange',
+    '#ffe0b2': 'orange', '#ffcc80': 'orange', '#fff3e0': 'orange',
+    # Purples
+    'purple': 'purple', '#9c27b0': 'purple', '#8e24aa': 'purple',
+    '#e1bee7': 'purple', '#ce93d8': 'purple', '#f3e5f5': 'purple',
+    # Grays
+    'gray': 'gray', 'grey': 'gray', '#9e9e9e': 'gray', '#757575': 'gray',
+    '#e0e0e0': 'gray', '#bdbdbd': 'gray', '#f5f5f5': 'gray',
+}
+
+
+def extract_cell_background_color(td: Tag) -> Optional[str]:
+    """
+    Extract background color from a table cell.
+    
+    Args:
+        td: The table cell element
+        
+    Returns:
+        Normalized color name (red, green, blue, yellow, orange, purple, gray) or None
+    """
+    import re
+    
+    # Check style attribute for background-color
+    style = td.get('style', '')
+    if style:
+        # Match background-color: #xxx or background-color: colorname
+        bg_match = re.search(r'background(?:-color)?\s*:\s*([^;]+)', style, re.IGNORECASE)
+        if bg_match:
+            color_value = bg_match.group(1).strip().lower()
+            return normalize_color(color_value)
+    
+    # Check bgcolor attribute (older HTML)
+    bgcolor = td.get('bgcolor', '')
+    if bgcolor:
+        return normalize_color(bgcolor.lower())
+    
+    # Check data-highlight-colour (Confluence specific)
+    highlight = td.get('data-highlight-colour', '')
+    if highlight:
+        return normalize_color(highlight.lower())
+    
+    return None
+
+
+def normalize_color(color_value: str) -> Optional[str]:
+    """
+    Normalize a color value to a standard color name.
+    
+    Args:
+        color_value: CSS color value (hex, rgb, or name)
+        
+    Returns:
+        Normalized color name or None
+    """
+    import re
+    
+    color_value = color_value.strip().lower()
+    
+    # Direct lookup
+    if color_value in COLOR_NAME_MAP:
+        return COLOR_NAME_MAP[color_value]
+    
+    # Handle rgb() format
+    rgb_match = re.match(r'rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)', color_value)
+    if rgb_match:
+        r, g, b = int(rgb_match.group(1)), int(rgb_match.group(2)), int(rgb_match.group(3))
+        return classify_rgb_color(r, g, b)
+    
+    # Handle hex format
+    hex_match = re.match(r'#?([0-9a-f]{6})', color_value)
+    if hex_match:
+        hex_val = hex_match.group(1)
+        r = int(hex_val[0:2], 16)
+        g = int(hex_val[2:4], 16)
+        b = int(hex_val[4:6], 16)
+        return classify_rgb_color(r, g, b)
+    
+    # Handle short hex format
+    hex_short_match = re.match(r'#?([0-9a-f]{3})$', color_value)
+    if hex_short_match:
+        hex_val = hex_short_match.group(1)
+        r = int(hex_val[0] * 2, 16)
+        g = int(hex_val[1] * 2, 16)
+        b = int(hex_val[2] * 2, 16)
+        return classify_rgb_color(r, g, b)
+    
+    return None
+
+
+def classify_rgb_color(r: int, g: int, b: int) -> Optional[str]:
+    """
+    Classify an RGB color into a named color category.
+    
+    Args:
+        r, g, b: RGB values (0-255)
+        
+    Returns:
+        Color name (red, green, blue, yellow, orange, purple, gray) or None
+    """
+    # Skip white or near-white backgrounds
+    if r > 240 and g > 240 and b > 240:
+        return None
+    
+    # Gray detection (low saturation)
+    max_val = max(r, g, b)
+    min_val = min(r, g, b)
+    diff = max_val - min_val
+    
+    if diff < 30:  # Low saturation = gray
+        if max_val < 200:  # Not too light
+            return 'gray'
+        return None
+    
+    # Determine dominant color
+    if r >= g and r >= b:
+        if g > b * 1.5:  # Red + significant green = yellow/orange
+            if g > r * 0.7:
+                return 'yellow'
+            return 'orange'
+        if b > g * 1.2:  # Red + blue = purple
+            return 'purple'
+        return 'red'
+    elif g >= r and g >= b:
+        return 'green'
+    else:  # Blue dominant
+        if r > g * 1.2:  # Blue + red = purple
+            return 'purple'
+        return 'blue'
+
 
 def parse_table(el: Tag, colorid_map: Optional[Dict[str, str]] = None, soup: Optional[BeautifulSoup] = None) -> Optional[Dict[str, Any]]:
     """
@@ -65,16 +212,25 @@ def parse_table(el: Tag, colorid_map: Optional[Dict[str, str]] = None, soup: Opt
             colspan = int(td.get('colspan', 1))
             rowspan = int(td.get('rowspan', 1))
             
+            # Extract background color from style or bgcolor attribute
+            bg_color = extract_cell_background_color(td)
+            
             # Process cell content
             cell_data = parse_table_cell(td, is_header, colorid_map, soup)
             
-            cells.append({
+            cell_info = {
                 'children': cell_data['children'],
                 'colspan': colspan,
                 'rowspan': rowspan,
                 'is_header': is_header,
                 'scope': scope
-            })
+            }
+            
+            # Add background color if present
+            if bg_color:
+                cell_info['bg_color'] = bg_color
+            
+            cells.append(cell_info)
         
         # Validate and truncate if row exceeds Notion's limit
         if len(cells) > NOTION_MAX_CELLS_PER_ROW:

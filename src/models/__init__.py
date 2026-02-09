@@ -6,8 +6,7 @@ from .config import (
     BaseConfig,
     StrategyConfig,
     S3Config,
-    CloudflareConfig,
-    TunnelConfig,
+    GCSConfig,
     ImportConfig,
     UploadMode
 )
@@ -17,7 +16,6 @@ from .errors import (
     NotionImporterError,
     ConfigurationError,
     UploadError,
-    TunnelError,
     NotionAPIError,
     VerificationError,
     ImportProcessError,
@@ -30,8 +28,7 @@ __all__ = [
     'BaseConfig',
     'StrategyConfig',
     'S3Config',
-    'CloudflareConfig',
-    'TunnelConfig',
+    'GCSConfig',
     'ImportConfig',
     'UploadMode',
     # Error handling
@@ -39,7 +36,6 @@ __all__ = [
     'NotionImporterError',
     'ConfigurationError',
     'UploadError',
-    'TunnelError',
     'NotionAPIError',
     'VerificationError',
     'ImportProcessError',
