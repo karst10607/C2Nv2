@@ -1,4 +1,4 @@
-# Upload Modes Guide - v3.1.0
+# Upload Modes Guide - v3.2.5
 
 ## Overview
 

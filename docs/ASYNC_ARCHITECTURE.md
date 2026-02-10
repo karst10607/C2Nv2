@@ -200,5 +200,4 @@ class ImageVerifier:
 
 ---
 
-**Next: I'll show you Plugin Architecture (#5) →**
 
